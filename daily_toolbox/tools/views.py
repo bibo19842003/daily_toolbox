@@ -67,6 +67,9 @@ DOH_PROVIDERS = [
 
 HOSTS_PATH = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc" / "hosts"
 
+# 方案二：社区维护的 GitHub 加速 hosts 订阅源（定期更新各域名最优 IP）
+REMOTE_HOSTS_URL = "https://gitlab.com/ineo6/hosts/-/raw/master/hosts?ref_type=heads&inline=false"
+
 
 def _doh_resolve(domain):
     """通过公共 DoH 接口解析域名，返回 A 记录 IP 列表。"""
@@ -312,6 +315,142 @@ def github_hosts_clear(request):
         "ok": True,
         "removed": len(old_lines),
         "old_lines": old_lines,
+        "backup": backup,
+        "dns_flushed": _flush_dns(),
+    })
+
+
+# ------------------------------------------------------------
+# 方案二：远程 hosts 订阅源（ineo6/hosts）
+# ------------------------------------------------------------
+
+REMOTE_SECTION_BEGIN = "# ===== Daily Toolbox 远程 hosts 源（ineo6/hosts）"
+REMOTE_SECTION_END = "# ===== Daily Toolbox 远程 hosts 源 结束 ====="
+
+
+def _fetch_remote_hosts(url, timeout=15):
+    """拉取远程 hosts 订阅源内容。"""
+    req = urllib.request.Request(url, headers={"user-agent": "daily-toolbox"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _parse_hosts_lines(text):
+    """解析出有效映射行，返回 [(原始行, ip, [域名...]), ...]。"""
+    result = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        valid = s.split("#", 1)[0].split()
+        if len(valid) < 2:
+            continue
+        try:
+            ipaddress.ip_address(valid[0])
+        except ValueError:
+            continue
+        result.append((line, valid[0], valid[1:]))
+    return result
+
+
+def _line_domains(line):
+    """返回该行映射的所有域名（忽略注释部分）。"""
+    valid = line.split("#", 1)[0].split()
+    return set(valid[1:]) if len(valid) >= 2 else set()
+
+
+def _remove_old_remote_section(lines):
+    """移除上一次写入的远程源段落（避免重复应用时累积）。"""
+    result, in_section = [], False
+    for line in lines:
+        s = line.strip()
+        if s.startswith(REMOTE_SECTION_BEGIN):
+            in_section = True
+            continue
+        if s == REMOTE_SECTION_END.strip():
+            in_section = False
+            continue
+        if not in_section:
+            result.append(line)
+    return result
+
+
+@require_GET
+def github_remote(request):
+    """获取远程 hosts 源内容并解析，返回预览信息（不写入）。"""
+    try:
+        text = _fetch_remote_hosts(REMOTE_HOSTS_URL)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "message": f"获取远程 hosts 失败：{exc.__class__.__name__}"}, status=502)
+
+    mappings = _parse_hosts_lines(text)
+    if not mappings:
+        return JsonResponse({"ok": False, "message": "远程 hosts 内容为空或格式不符"}, status=502)
+
+    domains = sorted({d for _, _, ds in mappings for d in ds})
+    return JsonResponse({
+        "ok": True,
+        "added": len(mappings),
+        "domain_count": len(domains),
+        "domains": domains,
+        "preview": [line for line, _, _ in mappings[:50]],
+    })
+
+
+@require_POST
+def github_remote_apply(request):
+    """拉取远程 hosts 源，替换本机 hosts 中相同域名的映射后合并写入。"""
+    try:
+        text = _fetch_remote_hosts(REMOTE_HOSTS_URL)
+    except Exception as exc:
+        return JsonResponse({"ok": False, "message": f"获取远程 hosts 失败：{exc.__class__.__name__}"}, status=502)
+
+    mappings = _parse_hosts_lines(text)
+    if not mappings:
+        return JsonResponse({"ok": False, "message": "远程 hosts 内容为空或格式不符"}, status=502)
+
+    remote_domains = {d for _, _, ds in mappings for d in ds}
+
+    try:
+        local_text = _read_hosts_text()
+    except OSError as exc:
+        return JsonResponse({"ok": False, "message": f"无法读取 hosts 文件：{exc}"}, status=500)
+
+    # 移除与远程源域名重叠的旧映射，以及上次的远程源段落
+    old_lines, kept = [], []
+    lines = _remove_old_remote_section(local_text.splitlines())
+    for line in lines:
+        if not line.strip().startswith("#") and (_line_domains(line) & remote_domains):
+            old_lines.append(line)
+        else:
+            kept.append(line)
+
+    stamp = timezone.localtime().strftime("%Y-%m-%d %H:%M:%S")
+    section = [
+        f"{REMOTE_SECTION_BEGIN} {stamp} =====",
+        *[line for line, _, _ in mappings],
+        REMOTE_SECTION_END,
+    ]
+    kept.extend(section)
+
+    try:
+        backup = _backup_and_write_hosts(kept)
+    except PermissionError:
+        return JsonResponse(
+            {"ok": False, "message": "权限不足：修改 hosts 需要管理员权限，请以管理员身份运行 Django 服务器后重试"},
+            status=500,
+        )
+    except OSError as exc:
+        return JsonResponse({"ok": False, "message": f"写入 hosts 失败：{exc}"}, status=500)
+
+    github_lines = [line for line, _, ds in mappings if "github.com" in ds]
+    return JsonResponse({
+        "ok": True,
+        "removed": len(old_lines),
+        "added": len(mappings),
+        "domain_count": len(remote_domains),
+        "old_lines": old_lines[:20],
+        "github_lines": github_lines,
         "backup": backup,
         "dns_flushed": _flush_dns(),
     })

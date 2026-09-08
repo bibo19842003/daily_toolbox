@@ -418,3 +418,28 @@ a {
     margin-left: 0;
   }
 }
+
+/* ===== GitHub 页：方案页签（青绿色系，与紫色主题区分） ===== */
+:root {
+  --tab-accent: #0d9488;
+  --tab-accent-2: #22b8a8;
+}
+.scheme-pills .nav-link {
+  border: 1px solid #d8e8e6;
+  color: var(--tab-accent);
+  background: #fff;
+  font-weight: 500;
+  margin-right: .5rem;
+  transition: all .15s ease-in-out;
+}
+.scheme-pills .nav-link:hover {
+  border-color: var(--tab-accent);
+  color: var(--tab-accent);
+  background: #f0fbf9;
+}
+.scheme-pills .nav-link.active {
+  color: #fff !important;
+  border-color: transparent !important;
+  background: linear-gradient(135deg, var(--tab-accent) 0%, var(--tab-accent-2) 100%) !important;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, .35);
+}

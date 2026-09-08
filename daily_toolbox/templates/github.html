@@ -6,17 +6,11 @@
   <div class="d-none">{% csrf_token %}</div>
 
   <!-- 页面标题 -->
-  <div class="d-flex flex-wrap align-items-end justify-content-between mb-4 gap-2">
-    <div>
-      <h1 class="page-title">访问 GitHub</h1>
-      <p class="page-subtitle">
-        通过公共 DoH 解析 GitHub 域名 IP 并测试连接延迟，选择最优 IP 一键写入 hosts，绕过 DNS 污染
-      </p>
-    </div>
-    <button class="btn btn-primary" id="fetchBtn" data-ips-url="{% url 'tools:github_ips' %}">
-      <span class="spinner-border spinner-border-sm d-none" id="fetchSpin"></span>
-      <i class="bi bi-arrow-repeat me-1"></i>获取 GitHub IP 列表
-    </button>
+  <div class="mb-4">
+    <h1 class="page-title">访问 GitHub</h1>
+    <p class="page-subtitle">
+      两种方式绕过 DNS 污染加速 GitHub：解析真实 IP 测延迟后写入，或直接订阅社区维护的 hosts 源
+    </p>
   </div>
 
   <!-- 当前 hosts 记录 -->
@@ -31,48 +25,101 @@
     </div>
   </div>
 
-  <!-- 域名解析结果 -->
-  <div class="card stat-card mb-4 d-none" id="domainCard">
-    <div class="card-body">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-hdd-network me-1"></i>域名解析结果（阿里 / DNSPod 公共 DoH）</h6>
-      <div id="domainList" class="d-flex flex-column gap-3"></div>
+  <!-- GitHub 加速：两个方案整合为一张卡片 -->
+  <div class="card stat-card mb-4">
+    <div class="card-header bg-transparent border-0 pb-0">
+      <ul class="nav nav-pills scheme-pills" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tabScheme1Btn" data-bs-toggle="pill" data-bs-target="#tabScheme1"
+                  type="button" role="tab">
+            <i class="bi bi-speedometer2 me-1"></i>方案一 · 解析 IP 测延迟
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tabScheme2Btn" data-bs-toggle="pill" data-bs-target="#tabScheme2"
+                  type="button" role="tab">
+            <i class="bi bi-cloud-download me-1"></i>方案二 · 订阅 hosts 源
+          </button>
+        </li>
+      </ul>
     </div>
-  </div>
-
-  <!-- IP 延迟列表与写入 -->
-  <div class="card stat-card mb-4 d-none" id="ipCard">
     <div class="card-body">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-speedometer2 me-1"></i>IP 延迟测试（TCP 443 端口）· 选择要写入 hosts 的 IP</h6>
-      <div class="table-responsive mb-3">
-        <table class="table table-hover align-middle mb-0">
-          <thead>
-            <tr>
-              <th style="width: 56px;">选择</th>
-              <th>IP 地址</th>
-              <th>所属域名</th>
-              <th>连接延迟</th>
-              <th>可用性</th>
-            </tr>
-          </thead>
-          <tbody id="ipTableBody"></tbody>
-        </table>
-      </div>
-      <div class="d-flex align-items-center flex-wrap gap-2">
-        <button class="btn btn-primary" id="applyBtn" disabled data-hosts-url="{% url 'tools:github_hosts' %}">
-          <span class="spinner-border spinner-border-sm d-none" id="applySpin"></span>
-          <i class="bi bi-save me-1"></i>写入 hosts（github.com）
-        </button>
-        <button class="btn btn-outline-secondary" id="clearBtn" data-clear-url="{% url 'tools:github_hosts_clear' %}">
-          <span class="spinner-border spinner-border-sm d-none" id="clearSpin"></span>
-          <i class="bi bi-eraser me-1"></i>清除 github.com 记录
-        </button>
-        <span class="text-secondary small">写操作前会自动备份原 hosts 为 hosts.toolbox.bak，并预检 IP</span>
-      </div>
-      <div class="alert alert-warning small mt-3 mb-0 py-2">
-        <i class="bi bi-exclamation-triangle me-1"></i>
-        系统会对每个 IP 做 TLS 证书校验（是否为 github.com 官方节点），CDN 域名的错误 IP 已禁止选择。
-        注意：若写入后访问仍提示 <code>Whoa there! invalid request</code>，说明 GitHub 对你当前网络出口做了反滥用拦截
-        （与所选 IP 无关），hosts 方案对主站失效，建议改用代理 / Watt Toolkit 等加速方案，或稍后重试。
+      <div class="tab-content">
+
+        <!-- ============ 方案一 ============ -->
+        <div class="tab-pane fade show active" id="tabScheme1" role="tabpanel">
+          <div class="d-flex align-items-center flex-wrap gap-2 mb-4">
+            <button class="btn btn-primary" id="fetchBtn" data-ips-url="{% url 'tools:github_ips' %}">
+              <span class="spinner-border spinner-border-sm d-none" id="fetchSpin"></span>
+              <i class="bi bi-arrow-repeat me-1"></i>获取 GitHub IP 列表
+            </button>
+            <span class="text-secondary small">解析 GitHub 相关域名并测试延迟，手动选择最优 IP 写入</span>
+          </div>
+
+          <!-- 域名解析结果 -->
+          <div class="d-none mb-4" id="domainCard">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-hdd-network me-1"></i>域名解析结果（阿里 / DNSPod 公共 DoH）</h6>
+            <div id="domainList" class="d-flex flex-column gap-3"></div>
+          </div>
+
+          <!-- IP 延迟列表与写入 -->
+          <div class="d-none" id="ipCard">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-speedometer2 me-1"></i>IP 延迟测试（TCP 443 端口）· 选择要写入 hosts 的 IP</h6>
+            <div class="table-responsive mb-3">
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th style="width: 56px;">选择</th>
+                    <th>IP 地址</th>
+                    <th>所属域名</th>
+                    <th>连接延迟</th>
+                    <th>可用性</th>
+                  </tr>
+                </thead>
+                <tbody id="ipTableBody"></tbody>
+              </table>
+            </div>
+            <div class="d-flex align-items-center flex-wrap gap-2">
+              <button class="btn btn-primary" id="applyBtn" disabled data-hosts-url="{% url 'tools:github_hosts' %}">
+                <span class="spinner-border spinner-border-sm d-none" id="applySpin"></span>
+                <i class="bi bi-save me-1"></i>写入 hosts（github.com）
+              </button>
+              <button class="btn btn-outline-secondary" id="clearBtn" data-clear-url="{% url 'tools:github_hosts_clear' %}">
+                <span class="spinner-border spinner-border-sm d-none" id="clearSpin"></span>
+                <i class="bi bi-eraser me-1"></i>清除 github.com 记录
+              </button>
+              <span class="text-secondary small">写操作前会自动备份原 hosts 为 hosts.toolbox.bak，并预检 IP</span>
+            </div>
+            <div class="alert alert-warning small mt-3 mb-0 py-2">
+              <i class="bi bi-exclamation-triangle me-1"></i>
+              系统会对每个 IP 做 TLS 证书校验（是否为 github.com 官方节点），CDN 域名的错误 IP 已禁止选择。
+              注意：若写入后访问仍提示 <code>Whoa there! invalid request</code>，说明 GitHub 对你当前网络出口做了反滥用拦截
+              （与所选 IP 无关），hosts 方案对主站失效，建议改用代理 / Watt Toolkit 等加速方案，或稍后重试。
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ 方案二 ============ -->
+        <div class="tab-pane fade" id="tabScheme2" role="tabpanel">
+          <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+            <button class="btn btn-outline-primary" id="remoteFetchBtn" data-url="{% url 'tools:github_remote' %}">
+              <span class="spinner-border spinner-border-sm d-none" id="remoteFetchSpin"></span>
+              <i class="bi bi-cloud-arrow-down me-1"></i>获取源内容
+            </button>
+            <button class="btn btn-primary" id="remoteApplyBtn" disabled data-url="{% url 'tools:github_remote_apply' %}">
+              <span class="spinner-border spinner-border-sm d-none" id="remoteApplySpin"></span>
+              <i class="bi bi-save me-1"></i>合并写入 hosts
+            </button>
+            <span class="text-secondary small" id="remoteSummary"></span>
+          </div>
+          <p class="text-secondary small mb-2">
+            订阅社区维护的
+            <a href="https://gitlab.com/ineo6/hosts" target="_blank" rel="noopener">ineo6/hosts</a>
+            源（定期更新 GitHub 全域名的最优 IP），无需手动挑选，一键合并写入。重复应用会自动替换旧段落，不会累积。
+          </p>
+          <pre class="d-none small text-secondary bg-light rounded p-2 mb-0" id="remotePreview" style="max-height: 260px; overflow-y: auto;"></pre>
+        </div>
+
       </div>
     </div>
   </div>
@@ -134,6 +181,22 @@
         resultModal.show();
       }
 
+      // 刷新"当前 hosts 记录"卡片
+      function refreshCurrentCard(lines) {
+        var body = document.getElementById('currentHostsBody');
+        var html = '<h6 class="fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>当前 hosts 中的 github.com 记录</h6>';
+        if (lines && lines.length) {
+          html += lines.map(function (l) {
+            return '<code class="d-block mb-1">' + escapeHtml(l) + '</code>';
+          }).join('');
+        } else {
+          html += '<span class="text-secondary small">暂无记录（hosts 中没有生效的 github.com 映射）</span>';
+        }
+        body.innerHTML = html;
+      }
+
+      // ==================== 方案一 ====================
+
       // 1. 获取 IP 列表
       fetchBtn.addEventListener('click', function () {
         fetchSpin.classList.remove('d-none');
@@ -193,20 +256,6 @@
         });
         ipCard.classList.remove('d-none');
         applyBtn.disabled = firstSelectable; // 没有任何可选 IP
-      }
-
-      // 刷新"当前 hosts 记录"卡片
-      function refreshCurrentCard(lines) {
-        var body = document.getElementById('currentHostsBody');
-        var html = '<h6 class="fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>当前 hosts 中的 github.com 记录</h6>';
-        if (lines && lines.length) {
-          html += lines.map(function (l) {
-            return '<code class="d-block mb-1">' + escapeHtml(l) + '</code>';
-          }).join('');
-        } else {
-          html += '<span class="text-secondary small">暂无记录（hosts 中没有生效的 github.com 映射）</span>';
-        }
-        body.innerHTML = html;
       }
 
       // 2. 写入 hosts
@@ -286,6 +335,79 @@
           .finally(function () {
             clearSpin.classList.add('d-none');
             clearBtn.disabled = false;
+          });
+      });
+
+      // ==================== 方案二 ====================
+
+      var remoteFetchBtn = document.getElementById('remoteFetchBtn');
+      var remoteFetchSpin = document.getElementById('remoteFetchSpin');
+      var remoteApplyBtn = document.getElementById('remoteApplyBtn');
+      var remoteApplySpin = document.getElementById('remoteApplySpin');
+      var remoteSummary = document.getElementById('remoteSummary');
+      var remotePreview = document.getElementById('remotePreview');
+
+      // 4. 获取远程 hosts 源
+      remoteFetchBtn.addEventListener('click', function () {
+        remoteFetchSpin.classList.remove('d-none');
+        remoteFetchBtn.disabled = true;
+        remoteApplyBtn.disabled = true;
+        remoteSummary.textContent = '';
+        fetch(remoteFetchBtn.dataset.url)
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              remoteSummary.textContent = '共 ' + data.added + ' 条映射，覆盖 ' + data.domain_count + ' 个域名';
+              remotePreview.textContent = data.preview.join('\n');
+              remotePreview.classList.remove('d-none');
+              remoteApplyBtn.disabled = false;
+            } else {
+              showModal(false, '<p class="mb-0">' + escapeHtml(data.message || '获取失败') + '</p>');
+            }
+          })
+          .catch(function () {
+            showModal(false, '<p class="mb-0">获取远程 hosts 失败，请检查网络后重试。</p>');
+          })
+          .finally(function () {
+            remoteFetchSpin.classList.add('d-none');
+            remoteFetchBtn.disabled = false;
+          });
+      });
+
+      // 5. 合并写入 hosts
+      remoteApplyBtn.addEventListener('click', function () {
+        remoteApplySpin.classList.remove('d-none');
+        remoteApplyBtn.disabled = true;
+        fetch(remoteApplyBtn.dataset.url, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': getCookie('csrftoken') }
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              var html = '<p class="mb-2">已合并写入 hosts：新增 <strong>' + data.added + '</strong> 条映射' +
+                '（覆盖 ' + data.domain_count + ' 个域名），替换旧映射 <strong>' + data.removed + '</strong> 条。</p>';
+              if (data.github_lines && data.github_lines.length) {
+                html += '<p class="mb-1 small text-secondary">其中 github.com 的映射：</p>' +
+                  data.github_lines.map(function (l) {
+                    return '<code class="d-block small mb-1">' + escapeHtml(l) + '</code>';
+                  }).join('');
+              }
+              html += '<hr><p class="mb-1 small">原 hosts 已备份为 <code>hosts.toolbox.bak</code>' +
+                (data.dns_flushed ? '，已刷新 DNS 缓存' : '') + '。</p>';
+              html += '<p class="mb-0 small text-secondary">访问 github.com 若仍提示 "Whoa there"，为 GitHub 反滥用拦截（与 hosts 无关）。</p>';
+              showModal(true, html);
+              refreshCurrentCard(data.github_lines || []);
+            } else {
+              showModal(false, '<p class="mb-0">' + escapeHtml(data.message || '未知错误') + '</p>');
+            }
+          })
+          .catch(function () {
+            showModal(false, '<p class="mb-0">请求失败，请确认服务器正在运行。</p>');
+          })
+          .finally(function () {
+            remoteApplySpin.classList.add('d-none');
+            remoteApplyBtn.disabled = false;
           });
       });
     })();
