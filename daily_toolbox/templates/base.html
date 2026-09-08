@@ -1,0 +1,96 @@
+{% load static %}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Daily Toolbox{% endblock %} - 日常小工具箱</title>
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap/css/bootstrap.min.css' %}">
+  <link rel="stylesheet" href="{% static 'vendor/bootstrap-icons/bootstrap-icons.min.css' %}">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+  <!-- ========== 左侧工具导航 ========== -->
+  <aside class="app-sidebar" id="appSidebar">
+    <div class="sidebar-brand">
+      <span class="brand-icon"><i class="bi bi-toolbox-fill"></i></span>
+      <span class="brand-text">Daily Toolbox</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <p class="nav-section">概览</p>
+      <a class="nav-link {% if request.resolver_match.url_name == 'index' %}active{% endif %}"
+         href="{% url 'tools:index' %}">
+        <i class="bi bi-house-door"></i> 首页
+      </a>
+
+      <p class="nav-section">网络工具</p>
+      <a class="nav-link" href="#"><i class="bi bi-github"></i> 访问github</a>
+
+      <p class="nav-section">文本处理</p>
+      <a class="nav-link" href="#"><i class="bi bi-braces"></i> JSON 格式化</a>
+      <a class="nav-link" href="#"><i class="bi bi-file-earmark-diff"></i> 文本对比</a>
+      <a class="nav-link" href="#"><i class="bi bi-translate"></i> 编码转换</a>
+
+      <p class="nav-section">开发辅助</p>
+      <a class="nav-link" href="#"><i class="bi bi-terminal"></i> 正则测试</a>
+      <a class="nav-link" href="#"><i class="bi bi-clock-history"></i> 时间戳转换</a>
+      <a class="nav-link" href="#"><i class="bi bi-key"></i> UUID 生成</a>
+      <a class="nav-link" href="#"><i class="bi bi-palette"></i> 颜色工具</a>
+
+      <p class="nav-section">图片处理</p>
+      <a class="nav-link" href="#"><i class="bi bi-images"></i> 图片压缩</a>
+      <a class="nav-link" href="#"><i class="bi bi-arrow-left-right"></i> 格式转换</a>
+      <a class="nav-link" href="#"><i class="bi bi-file-earmark-image"></i> 图片转 Base64</a>
+
+      <p class="nav-section">日常办公</p>
+      <a class="nav-link" href="#"><i class="bi bi-calculator"></i> 单位换算</a>
+      <a class="nav-link" href="#"><i class="bi bi-calendar-week"></i> 万年历</a>
+      <a class="nav-link" href="#"><i class="bi bi-dice-5"></i> 随机决定</a>
+    </nav>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- ========== 主区域 ========== -->
+  <div class="app-main">
+
+    <!-- 顶栏 -->
+    <header class="app-topbar">
+      <button class="toggle-btn d-lg-none" id="sidebarToggle" aria-label="切换侧边栏">
+        <i class="bi bi-list"></i>
+      </button>
+
+      <div class="topbar-search d-none d-md-block">
+        <i class="bi bi-search"></i>
+        <input type="search" class="form-control" placeholder="搜索工具…">
+      </div>
+
+    </header>
+
+    <!-- 内容区 -->
+    <main class="app-content">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+      © 2026 Daily Toolbox · 基于 Django + Bootstrap 5 构建
+    </footer>
+  </div>
+
+  <script src="{% static 'vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
+  <script>
+    // 移动端侧边栏开合
+    (function () {
+      var toggle = document.getElementById('sidebarToggle');
+      var backdrop = document.getElementById('sidebarBackdrop');
+      function closeSidebar() { document.body.classList.remove('sidebar-open'); }
+      toggle.addEventListener('click', function () {
+        document.body.classList.toggle('sidebar-open');
+      });
+      backdrop.addEventListener('click', closeSidebar);
+    })();
+  </script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

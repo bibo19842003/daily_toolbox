@@ -1,0 +1,57 @@
+# 字节码 / 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# 包构建与分发
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+pip-wheel-metadata/
+
+# 安装与打包日志
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 单元测试 / 覆盖率
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+
+# 类型检查 / Linter
+.mypy_cache/
+.ruff_cache/
+.pytype/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+/media/
+/staticfiles/
+
+# 环境变量与密钥
+.env
+.env.*
+*.pem
+
+# 日志
+*.log
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
