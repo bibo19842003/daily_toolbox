@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}访问 GitHub{% endblock %}
+
+{% block content %}
+  <div class="d-none">{% csrf_token %}</div>
+
+  <!-- 页面标题 -->
+  <div class="d-flex flex-wrap align-items-end justify-content-between mb-4 gap-2">
+    <div>
+      <h1 class="page-title">访问 GitHub</h1>
+      <p class="page-subtitle">
+        通过公共 DoH 解析 GitHub 域名 IP 并测试连接延迟，选择最优 IP 一键写入 hosts，绕过 DNS 污染
+      </p>
+    </div>
+    <button class="btn btn-primary" id="fetchBtn" data-ips-url="{% url 'tools:github_ips' %}">
+      <span class="spinner-border spinner-border-sm d-none" id="fetchSpin"></span>
+      <i class="bi bi-arrow-repeat me-1"></i>获取 GitHub IP 列表
+    </button>
+  </div>
+
+  <!-- 当前 hosts 记录 -->
+  <div class="card stat-card mb-4">
+    <div class="card-body" id="currentHostsBody">
+      <h6 class="fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>当前 hosts 中的 github.com 记录</h6>
+      {% if current_hosts %}
+        {% for line in current_hosts %}<code class="d-block mb-1">{{ line }}</code>{% endfor %}
+      {% else %}
+        <span class="text-secondary small">暂无记录（hosts 中没有生效的 github.com 映射）</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- 域名解析结果 -->
+  <div class="card stat-card mb-4 d-none" id="domainCard">
+    <div class="card-body">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-hdd-network me-1"></i>域名解析结果（阿里 / DNSPod 公共 DoH）</h6>
+      <div id="domainList" class="d-flex flex-column gap-3"></div>
+    </div>
+  </div>
+
+  <!-- IP 延迟列表与写入 -->
+  <div class="card stat-card mb-4 d-none" id="ipCard">
+    <div class="card-body">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-speedometer2 me-1"></i>IP 延迟测试（TCP 443 端口）· 选择要写入 hosts 的 IP</h6>
+      <div class="table-responsive mb-3">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="width: 56px;">选择</th>
+              <th>IP 地址</th>
+              <th>所属域名</th>
+              <th>连接延迟</th>
+              <th>可用性</th>
+            </tr>
+          </thead>
+          <tbody id="ipTableBody"></tbody>
+        </table>
+      </div>
+      <div class="d-flex align-items-center flex-wrap gap-2">
+        <button class="btn btn-primary" id="applyBtn" disabled data-hosts-url="{% url 'tools:github_hosts' %}">
+          <span class="spinner-border spinner-border-sm d-none" id="applySpin"></span>
+          <i class="bi bi-save me-1"></i>写入 hosts（github.com）
+        </button>
+        <button class="btn btn-outline-secondary" id="clearBtn" data-clear-url="{% url 'tools:github_hosts_clear' %}">
+          <span class="spinner-border spinner-border-sm d-none" id="clearSpin"></span>
+          <i class="bi bi-eraser me-1"></i>清除 github.com 记录
+        </button>
+        <span class="text-secondary small">写操作前会自动备份原 hosts 为 hosts.toolbox.bak，并预检 IP</span>
+      </div>
+      <div class="alert alert-warning small mt-3 mb-0 py-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        系统会对每个 IP 做 TLS 证书校验（是否为 github.com 官方节点），CDN 域名的错误 IP 已禁止选择。
+        注意：若写入后访问仍提示 <code>Whoa there! invalid request</code>，说明 GitHub 对你当前网络出口做了反滥用拦截
+        （与所选 IP 无关），hosts 方案对主站失效，建议改用代理 / Watt Toolkit 等加速方案，或稍后重试。
+      </div>
+    </div>
+  </div>
+
+  <!-- 结果弹窗 -->
+  <div class="modal fade" id="resultModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="resultTitle"></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body" id="resultBody"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var fetchBtn = document.getElementById('fetchBtn');
+      var fetchSpin = document.getElementById('fetchSpin');
+      var applyBtn = document.getElementById('applyBtn');
+      var applySpin = document.getElementById('applySpin');
+      var domainCard = document.getElementById('domainCard');
+      var domainList = document.getElementById('domainList');
+      var ipCard = document.getElementById('ipCard');
+      var tbody = document.getElementById('ipTableBody');
+      var resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
+      var resultTitle = document.getElementById('resultTitle');
+      var resultBody = document.getElementById('resultBody');
+
+      function getCookie(name) {
+        var m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+        return m ? m.pop() : '';
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function latencyBadge(ms) {
+        if (ms === null) return '<span class="badge bg-secondary">超时</span>';
+        if (ms < 100) return '<span class="badge bg-success">' + ms + ' ms</span>';
+        if (ms < 300) return '<span class="badge bg-warning text-dark">' + ms + ' ms</span>';
+        return '<span class="badge bg-danger">' + ms + ' ms</span>';
+      }
+
+      function showModal(ok, html) {
+        resultTitle.textContent = ok ? '替换成功' : '操作失败';
+        resultTitle.className = 'modal-title ' + (ok ? 'text-success' : 'text-danger');
+        resultBody.innerHTML = html;
+        resultModal.show();
+      }
+
+      // 1. 获取 IP 列表
+      fetchBtn.addEventListener('click', function () {
+        fetchSpin.classList.remove('d-none');
+        fetchBtn.disabled = true;
+        fetch(fetchBtn.dataset.ipsUrl)
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            renderDomains(data.domains || []);
+            renderIps(data.ips || []);
+          })
+          .catch(function () {
+            showModal(false, '<p class="mb-0">获取 IP 列表失败，请检查网络后重试。</p>');
+          })
+          .finally(function () {
+            fetchSpin.classList.add('d-none');
+            fetchBtn.disabled = false;
+          });
+      });
+
+      function renderDomains(domains) {
+        domainList.innerHTML = '';
+        domains.forEach(function (d) {
+          var row = document.createElement('div');
+          var chips = d.ips.length
+            ? d.ips.map(function (item) {
+                return '<span class="badge bg-light text-dark border fw-normal me-1">' + escapeHtml(item.ip) + '</span>' +
+                       '<span class="me-2">' + latencyBadge(item.latency) + '</span>';
+              }).join('')
+            : '<span class="text-secondary small">解析失败</span>';
+          row.innerHTML = '<div class="fw-semibold small mb-1">' + escapeHtml(d.domain) + '</div><div>' + chips + '</div>';
+          domainList.appendChild(row);
+        });
+        domainCard.classList.remove('d-none');
+      }
+
+      function renderIps(ips) {
+        tbody.innerHTML = '';
+        var firstSelectable = true;
+        ips.forEach(function (item) {
+          var servesGithub = item.web_ok === true;
+          var checked = servesGithub && firstSelectable ? ' checked' : '';
+          if (servesGithub) firstSelectable = false;
+          var domainBadges = (item.domains || []).map(function (d) {
+            return '<span class="badge bg-light text-secondary border fw-normal me-1">' + escapeHtml(d) + '</span>';
+          }).join('') || '<span class="text-secondary">—</span>';
+          var tr = document.createElement('tr');
+          if (!servesGithub) tr.className = 'text-muted';
+          tr.innerHTML =
+            '<td><input class="form-check-input" type="radio" name="ipChoice" value="' + escapeHtml(item.ip) + '"' + checked + (servesGithub ? '' : ' disabled') + '></td>' +
+            '<td><code' + (servesGithub ? '' : ' style="color:inherit"') + '>' + escapeHtml(item.ip) + '</code></td>' +
+            '<td style="max-width:260px">' + domainBadges + '</td>' +
+            '<td>' + latencyBadge(item.latency) + '</td>' +
+            '<td>' + (servesGithub
+              ? '<span class="badge bg-success">可用</span>'
+              : '<span class="badge bg-secondary">不可用</span>') + '</td>';
+          tbody.appendChild(tr);
+        });
+        ipCard.classList.remove('d-none');
+        applyBtn.disabled = firstSelectable; // 没有任何可选 IP
+      }
+
+      // 刷新"当前 hosts 记录"卡片
+      function refreshCurrentCard(lines) {
+        var body = document.getElementById('currentHostsBody');
+        var html = '<h6 class="fw-semibold mb-2"><i class="bi bi-file-earmark-text me-1"></i>当前 hosts 中的 github.com 记录</h6>';
+        if (lines && lines.length) {
+          html += lines.map(function (l) {
+            return '<code class="d-block mb-1">' + escapeHtml(l) + '</code>';
+          }).join('');
+        } else {
+          html += '<span class="text-secondary small">暂无记录（hosts 中没有生效的 github.com 映射）</span>';
+        }
+        body.innerHTML = html;
+      }
+
+      // 2. 写入 hosts
+      applyBtn.addEventListener('click', function () {
+        var checked = document.querySelector('input[name="ipChoice"]:checked');
+        if (!checked) return;
+        applySpin.classList.remove('d-none');
+        applyBtn.disabled = true;
+        fetch(applyBtn.dataset.hostsUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+          body: JSON.stringify({ ip: checked.value })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              var html = '<p class="mb-2">已将 hosts 中 github.com 的映射替换为：</p>' +
+                '<p><code class="fs-6">' + escapeHtml(data.new_line) + '</code></p>';
+              if (data.old_lines && data.old_lines.length) {
+                html += '<p class="mb-1 small text-secondary">原记录：</p>' +
+                  data.old_lines.map(function (l) {
+                    return '<code class="d-block small mb-1">' + escapeHtml(l) + '</code>';
+                  }).join('');
+              }
+              html += '<hr><p class="mb-1 small">原 hosts 已备份为 <code>hosts.toolbox.bak</code></p>';
+              if (data.dns_flushed) {
+                html += '<p class="mb-0 small">已自动刷新本机 DNS 缓存。若访问 github.com 仍提示 "Whoa there"，说明被 GitHub 反滥用拦截（与 IP 无关），请改用代理方案。</p>';
+              }
+              showModal(true, html);
+              refreshCurrentCard([data.new_line]);
+            } else {
+              showModal(false, '<p class="mb-0">' + escapeHtml(data.message || '未知错误') + '</p>');
+            }
+          })
+          .catch(function () {
+            showModal(false, '<p class="mb-0">请求失败，请确认服务器正在运行。</p>');
+          })
+          .finally(function () {
+            applySpin.classList.add('d-none');
+            applyBtn.disabled = false;
+          });
+      });
+
+      // 3. 清除 github.com 记录
+      var clearBtn = document.getElementById('clearBtn');
+      var clearSpin = document.getElementById('clearSpin');
+      clearBtn.addEventListener('click', function () {
+        clearSpin.classList.remove('d-none');
+        clearBtn.disabled = true;
+        fetch(clearBtn.dataset.clearUrl, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': getCookie('csrftoken') }
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              var html;
+              if (data.removed > 0) {
+                html = '<p class="mb-2">已从 hosts 移除 ' + data.removed + ' 条 github.com 映射，恢复默认 DNS 解析：</p>' +
+                  data.old_lines.map(function (l) {
+                    return '<code class="d-block small mb-1">' + escapeHtml(l) + '</code>';
+                  }).join('') +
+                  '<hr><p class="mb-0 small">原 hosts 已备份为 <code>hosts.toolbox.bak</code>' +
+                  (data.dns_flushed ? '，已刷新 DNS 缓存' : '') + '。</p>';
+                refreshCurrentCard([]);
+              } else {
+                html = '<p class="mb-0">' + escapeHtml(data.message || '无需清除') + '</p>';
+              }
+              showModal(true, html);
+            } else {
+              showModal(false, '<p class="mb-0">' + escapeHtml(data.message || '未知错误') + '</p>');
+            }
+          })
+          .catch(function () {
+            showModal(false, '<p class="mb-0">请求失败，请确认服务器正在运行。</p>');
+          })
+          .finally(function () {
+            clearSpin.classList.add('d-none');
+            clearBtn.disabled = false;
+          });
+      });
+    })();
+  </script>
+{% endblock %}
