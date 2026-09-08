@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block title %}本机 WiFi 信息{% endblock %}
+
+{% block content %}
+  <!-- 页面标题 -->
+  <div class="mb-4">
+    <h1 class="page-title">本机 WiFi 信息</h1>
+    <p class="page-subtitle">查看当前 WLAN 连接状态、已保存的 WiFi 配置文件及密码（密码来自本机 netsh 存储）</p>
+  </div>
+
+  <!-- 当前连接信息 -->
+  <div class="card stat-card mb-4">
+    <div class="card-body">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-broadcast me-1"></i>当前连接信息</h6>
+      <div class="text-secondary small" id="ifLoading">
+        <span class="spinner-border spinner-border-sm me-1"></span>正在读取 WLAN 接口信息…
+      </div>
+      <div class="d-none" id="ifList"></div>
+      <div class="d-none alert alert-secondary small py-2 mb-0" id="ifEmpty">
+        未检测到 WLAN 接口或当前没有无线网卡信息。
+      </div>
+    </div>
+  </div>
+
+  <!-- 已保存的 WiFi 列表 -->
+  <div class="card stat-card mb-4">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <h6 class="fw-semibold mb-0"><i class="bi bi-collection me-1"></i>已保存的 WiFi 配置文件</h6>
+        <button class="btn btn-outline-primary btn-sm" id="showAllBtn">
+          <span class="spinner-border spinner-border-sm d-none" id="showAllSpin"></span>
+          <i class="bi bi-eye me-1"></i>一键显示全部密码
+        </button>
+      </div>
+      <div class="text-secondary small mb-2" id="pfLoading">
+        <span class="spinner-border spinner-border-sm me-1"></span>正在读取配置文件…
+      </div>
+      <div class="table-responsive d-none">
+        <table class="table table-hover align-middle mb-0" id="pfTable">
+          <thead>
+            <tr>
+              <th style="width: 34%;">WiFi 名称</th>
+              <th>状态</th>
+              <th>密码</th>
+              <th style="width: 130px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="pfBody"></tbody>
+        </table>
+      </div>
+      <div class="d-none alert alert-secondary small py-2 mb-0" id="pfEmpty">本机没有保存任何 WiFi 配置文件。</div>
+      <div class="alert alert-info small mt-3 mb-0 py-2">
+        <i class="bi bi-shield-lock me-1"></i>
+        密码由 Windows 通过 <code>netsh wlan show profile key=clear</code> 读取，仅限本机已连接并保存过的 WiFi。
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var ifList = document.getElementById('ifList');
+      var ifLoading = document.getElementById('ifLoading');
+      var ifEmpty = document.getElementById('ifEmpty');
+      var pfBody = document.getElementById('pfBody');
+      var pfLoading = document.getElementById('pfLoading');
+      var pfEmpty = document.getElementById('pfEmpty');
+      var pfTableWrap = document.getElementById('pfTable').closest('.table-responsive');
+      var showAllBtn = document.getElementById('showAllBtn');
+      var showAllSpin = document.getElementById('showAllSpin');
+      var currentSsid = '';
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function copyText(text, btn) {
+        navigator.clipboard.writeText(text).then(function () {
+          var old = btn.innerHTML;
+          btn.innerHTML = '<i class="bi bi-check2"></i> 已复制';
+          setTimeout(function () { btn.innerHTML = old; }, 1500);
+        });
+      }
+
+      // 当前连接信息
+      fetch('{% url 'tools:wifi_interfaces' %}')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          ifLoading.classList.add('d-none');
+          if (!data.ok || !data.items.length) {
+            ifEmpty.classList.remove('d-none');
+            return;
+          }
+          data.items.forEach(function (pair) {
+            var row = document.createElement('div');
+            row.className = 'd-flex py-1';
+            row.style.borderBottom = '1px dashed #e9edf3';
+            row.innerHTML =
+              '<div class="text-secondary small" style="width: 180px; flex-shrink: 0;">' + escapeHtml(pair[0]) + '</div>' +
+              '<div class="small fw-semibold">' + escapeHtml(pair[1]) + '</div>';
+            ifList.appendChild(row);
+          });
+          ifList.classList.remove('d-none');
+        })
+        .catch(function () {
+          ifLoading.innerHTML = '<span class="text-danger">读取失败，请确认服务器正在运行。</span>';
+        });
+
+      // 已保存的 WiFi 列表
+      fetch('{% url 'tools:wifi_profiles' %}')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          pfLoading.classList.add('d-none');
+          if (!data.profiles || !data.profiles.length) {
+            pfEmpty.classList.remove('d-none');
+            return;
+          }
+          currentSsid = data.current || '';
+          data.profiles.forEach(function (name) {
+            var tr = document.createElement('tr');
+            tr.dataset.ssid = name;
+            tr.innerHTML =
+              '<td><code>' + escapeHtml(name) + '</code></td>' +
+              '<td>' + (name === currentSsid
+                ? '<span class="badge bg-success">当前连接</span>'
+                : '<span class="badge bg-light text-secondary border">已保存</span>') + '</td>' +
+              '<td class="pw-cell text-secondary small">—</td>' +
+              '<td><button class="btn btn-sm btn-outline-primary pw-btn">' +
+                '<span class="spinner-border spinner-border-sm d-none"></span>' +
+                '<i class="bi bi-key me-1"></i>查看密码</button></td>';
+            pfBody.appendChild(tr);
+          });
+          pfTableWrap.classList.remove('d-none');
+        })
+        .catch(function () {
+          pfLoading.innerHTML = '<span class="text-danger">读取失败，请确认服务器正在运行。</span>';
+        });
+
+      // 查看单个密码
+      function loadPassword(tr) {
+        var ssid = tr.dataset.ssid;
+        var btn = tr.querySelector('.pw-btn');
+        var spin = btn.querySelector('.spinner-border');
+        var cell = tr.querySelector('.pw-cell');
+        spin.classList.remove('d-none');
+        btn.disabled = true;
+        return fetch('{% url 'tools:wifi_password' %}?ssid=' + encodeURIComponent(ssid))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.ok) {
+              var info = [];
+              if (data.auth) info.push(escapeHtml(data.auth));
+              if (data.cipher) info.push(escapeHtml(data.cipher));
+              cell.innerHTML =
+                '<code class="fs-6">' + escapeHtml(data.password) + '</code>' +
+                (info.length ? '<div class="text-secondary" style="font-size:.75rem">' + info.join(' / ') + '</div>' : '') +
+                ' <button class="btn btn-sm btn-link p-0 ms-1 copy-btn"><i class="bi bi-clipboard"></i></button>';
+              cell.querySelector('.copy-btn').addEventListener('click', function () {
+                copyText(data.password, this);
+              });
+              btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>重新读取';
+            } else {
+              cell.innerHTML = '<span class="text-danger small">' + escapeHtml(data.message || '读取失败') + '</span>';
+              btn.innerHTML = '<i class="bi bi-key me-1"></i>查看密码';
+            }
+          })
+          .catch(function () {
+            cell.innerHTML = '<span class="text-danger small">请求失败</span>';
+          })
+          .finally(function () {
+            spin.classList.add('d-none');
+            btn.disabled = false;
+          });
+      }
+
+      pfBody.addEventListener('click', function (e) {
+        var btn = e.target.closest('.pw-btn');
+        if (btn) loadPassword(btn.closest('tr'));
+      });
+
+      // 一键显示全部密码（顺序执行，避免并发 netsh 冲突）
+      showAllBtn.addEventListener('click', function () {
+        showAllSpin.classList.remove('d-none');
+        showAllBtn.disabled = true;
+        var rows = Array.prototype.slice.call(pfBody.querySelectorAll('tr'));
+        var chain = Promise.resolve();
+        rows.forEach(function (tr) {
+          chain = chain.then(function () { return loadPassword(tr); });
+        });
+        chain.finally(function () {
+          showAllSpin.classList.add('d-none');
+          showAllBtn.disabled = false;
+        });
+      });
+    })();
+  </script>
+{% endblock %}

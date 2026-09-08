@@ -51,6 +51,10 @@
       <a class="nav-link" href="#"><i class="bi bi-calculator"></i> 单位换算</a>
       <a class="nav-link" href="#"><i class="bi bi-calendar-week"></i> 万年历</a>
       <a class="nav-link" href="#"><i class="bi bi-dice-5"></i> 随机决定</a>
+
+      <p class="nav-section">电脑相关</p>
+      <a class="nav-link {% if request.resolver_match.url_name == 'wifi_page' %}active{% endif %}"
+         href="{% url 'tools:wifi_page' %}"><i class="bi bi-wifi"></i> 本机wifi信息</a>
     </nav>
   </aside>
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>

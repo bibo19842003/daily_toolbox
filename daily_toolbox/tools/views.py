@@ -454,3 +454,79 @@ def github_remote_apply(request):
         "backup": backup,
         "dns_flushed": _flush_dns(),
     })
+
+
+# ------------------------------------------------------------
+# 本机 WiFi 信息（netsh wlan）
+# ------------------------------------------------------------
+
+def wifi_page(request):
+    return render(request, "wifi.html")
+
+
+def _run_netsh(args, timeout=15):
+    """执行 netsh wlan 命令，返回解码后的输出文本。"""
+    completed = subprocess.run(["netsh", "wlan", *args], capture_output=True, timeout=timeout)
+    text = completed.stdout.decode("gbk", "replace")
+    if not text.strip():
+        text = completed.stderr.decode("gbk", "replace")
+    return text
+
+
+@require_GET
+def wifi_interfaces(request):
+    """当前 WLAN 接口的连接信息（兼容中英文系统输出）。"""
+    text = _run_netsh(["show", "interfaces"])
+    items = []
+    for line in text.splitlines():
+        m = re.match(r"\s{2,}(.+?)\s*:\s(.+)$", line)
+        if not m:
+            continue
+        label, value = m.group(1).strip(), m.group(2).strip()
+        if not label or not value or label.lower() == "guid":
+            continue
+        items.append([label, value])
+    return JsonResponse({"ok": bool(items), "items": items})
+
+
+@require_GET
+def wifi_profiles(request):
+    """已保存的 WLAN 配置文件列表 + 当前连接的 SSID。"""
+    profiles = []
+    for line in _run_netsh(["show", "profiles"]).splitlines():
+        m = re.match(r"\s*(?:所有用户配置文件|All User Profile)\s*:\s(.+)$", line)
+        if m and m.group(1).strip():
+            profiles.append(m.group(1).strip())
+
+    current = ""
+    m = re.search(r"^\s*SSID\s*:\s(.+)$", _run_netsh(["show", "interfaces"]), re.M)
+    if m:
+        current = m.group(1).strip()
+    return JsonResponse({"ok": True, "profiles": profiles, "current": current})
+
+
+@require_GET
+def wifi_password(request):
+    """查看指定 WiFi 的明文密码（来自本机存储的配置文件）。"""
+    ssid = request.GET.get("ssid", "").strip()
+    if not ssid or len(ssid) > 64 or "\n" in ssid or '"' in ssid:
+        return JsonResponse({"ok": False, "message": "无效的 WiFi 名称"}, status=400)
+
+    text = _run_netsh(["show", "profile", f'name="{ssid}"', "key=clear"])
+
+    if "not found" in text or "找不到" in text or "没有" in text:
+        return JsonResponse({"ok": False, "message": "未找到该 WiFi 的配置文件"}, status=404)
+
+    pm = re.search(r"(?:Key Content|关键内容)\s*:\s(.+)$", text, re.M)
+    if not pm:
+        return JsonResponse({"ok": False, "message": "该 WiFi 未存储密码（可能是开放网络）"}, status=404)
+
+    auth = re.search(r"(?:Authentication|身份验证)\s*:\s(.+)$", text, re.M)
+    cipher = re.search(r"(?:Cipher|加密)\s*:\s(.+)$", text, re.M)
+    return JsonResponse({
+        "ok": True,
+        "ssid": ssid,
+        "password": pm.group(1).strip(),
+        "auth": auth.group(1).strip() if auth else "",
+        "cipher": cipher.group(1).strip() if cipher else "",
+    })

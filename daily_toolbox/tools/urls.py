@@ -13,4 +13,8 @@ urlpatterns = [
     path("api/github/hosts/clear/", views.github_hosts_clear, name="github_hosts_clear"),
     path("api/github/remote/", views.github_remote, name="github_remote"),
     path("api/github/remote/apply/", views.github_remote_apply, name="github_remote_apply"),
+    path("wifi/", views.wifi_page, name="wifi_page"),
+    path("api/wifi/interfaces/", views.wifi_interfaces, name="wifi_interfaces"),
+    path("api/wifi/profiles/", views.wifi_profiles, name="wifi_profiles"),
+    path("api/wifi/password/", views.wifi_password, name="wifi_password"),
 ]
