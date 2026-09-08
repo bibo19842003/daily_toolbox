@@ -330,6 +330,74 @@ a {
   font-weight: 500;
 }
 
+/* 图标列表页 */
+
+.icon-search-box {
+  position: relative;
+}
+
+.icon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 0.75rem;
+}
+
+.icon-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 96px;
+  padding: 0.9rem 0.5rem;
+  background: #fff;
+  border: 1px solid #e9edf3;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.icon-item:hover {
+  border-color: var(--accent-2);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(111, 91, 245, 0.14);
+}
+
+.icon-item i {
+  font-size: 1.55rem;
+  color: #2b3245;
+}
+
+.icon-item .icon-name {
+  font-size: 0.72rem;
+  color: #8a92a6;
+  text-align: center;
+  word-break: break-all;
+}
+
+.copy-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(16px);
+  z-index: 1080;
+  padding: 0.5rem 1.1rem;
+  border-radius: 2rem;
+  background: #2b3245;
+  color: #fff;
+  font-size: 0.85rem;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+.copy-toast.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* 响应式：小屏侧边栏抽屉化 */
 
 @media (max-width: 991.98px) {

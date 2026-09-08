@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}图标列表{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-wrap align-items-end justify-content-between mb-4 gap-2">
+    <div>
+      <h1 class="page-title">图标列表</h1>
+      <p class="page-subtitle">
+        Bootstrap Icons v1.11.3 · 共 {{ icons|length }} 个图标 · 数据来源
+        <a href="https://icons.getbootstrap.com/" target="_blank" rel="noopener">icons.getbootstrap.com</a>
+        · 点击图标复制类名
+      </p>
+    </div>
+    <div class="topbar-search icon-search-box w-100 d-block" style="max-width: 360px;">
+      <i class="bi bi-search"></i>
+      <input type="search" id="iconSearch" class="form-control" placeholder="搜索图标名，如 github / heart / arrow…">
+    </div>
+  </div>
+
+  <div class="icon-grid" id="iconGrid">
+    {% for icon in icons %}
+      <div class="icon-item" data-name="{{ icon }}" title="点击复制 bi-{{ icon }}">
+        <i class="bi bi-{{ icon }}"></i>
+        <span class="icon-name">{{ icon }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="copy-toast" id="copyToast"></div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var search = document.getElementById('iconSearch');
+      var grid = document.getElementById('iconGrid');
+      var items = grid.querySelectorAll('.icon-item');
+      var toast = document.getElementById('copyToast');
+      var toastTimer = null;
+
+      // 搜索过滤
+      search.addEventListener('input', function () {
+        var kw = this.value.trim().toLowerCase();
+        items.forEach(function (item) {
+          var name = item.dataset.name;
+          item.classList.toggle('d-none', kw && name.indexOf(kw) === -1);
+        });
+      });
+
+      // 点击复制类名
+      grid.addEventListener('click', function (e) {
+        var item = e.target.closest('.icon-item');
+        if (!item) return;
+        var className = 'bi-' + item.dataset.name;
+        navigator.clipboard.writeText(className).then(function () {
+          showToast('已复制 ' + className);
+        });
+      });
+
+      function showToast(text) {
+        toast.textContent = text;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () {
+          toast.classList.remove('show');
+        }, 1200);
+      }
+    })();
+  </script>
+{% endblock %}
