@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+
+{% block title %}颜色工具{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <h1 class="page-title">颜色工具</h1>
+    <p class="page-subtitle">HEX / RGB / HSL / HSV / CMYK 互转、明暗色阶、配色方案与对比度检查</p>
+  </div>
+
+  <div class="row g-4">
+    <!-- 颜色选择与格式 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <div class="row g-4 align-items-center">
+            <div class="col-md-auto">
+              <div class="rounded-3 border" id="previewBox" style="width:140px;height:140px;background:#4f46e5"></div>
+            </div>
+            <div class="col-md">
+              <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                <input type="color" class="form-control form-control-color" id="colorPicker" value="#4f46e5" title="取色器">
+                <input type="text" class="form-control font-monospace w-auto" id="colorInput" placeholder="#4f46e5 / rgb(79,70,229) / red / hsl(243,75%,59%)">
+                <button class="btn btn-primary" id="parseBtn" type="button"><i class="bi bi-arrow-repeat me-1"></i>解析</button>
+                <span class="text-secondary small">支持 HEX / RGB / RGBA / HSL / 英文名</span>
+              </div>
+              <div class="d-none alert alert-warning small py-2" id="colorErr"></div>
+              <div class="row row-cols-1 row-cols-md-2" id="fmtList"></div>
+            </div>
+          </div>
+          <div class="mt-3 d-flex flex-wrap gap-3 small" id="contrastInfo"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 明暗色阶 -->
+    <div class="col-lg-6">
+      <div class="card stat-card h-100">
+        <div class="card-body">
+          <h6 class="fw-semibold mb-3"><i class="bi bi-droplet-half me-1"></i>明暗色阶（点击应用）</h6>
+          <div class="d-flex flex-column gap-2" id="scaleWrap"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 配色方案 -->
+    <div class="col-lg-6">
+      <div class="card stat-card h-100">
+        <div class="card-body">
+          <h6 class="fw-semibold mb-3"><i class="bi bi-palette2 me-1"></i>配色方案（点击应用）</h6>
+          <div id="schemeWrap" class="d-flex flex-column gap-3"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 预设色板 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <h6 class="fw-semibold mb-3"><i class="bi bi-grid-3x3-gap me-1"></i>常用色板（点击应用）</h6>
+          <div class="d-flex flex-wrap gap-2" id="paletteWrap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var NAMED = {
+        black: [0, 0, 0], white: [255, 255, 255], red: [255, 0, 0], green: [0, 128, 0],
+        blue: [0, 0, 255], yellow: [255, 255, 0], orange: [255, 165, 0], purple: [128, 0, 128],
+        pink: [255, 192, 203], gray: [128, 128, 128], grey: [128, 128, 128], silver: [192, 192, 192],
+        maroon: [128, 0, 0], navy: [0, 0, 128], olive: [128, 128, 0], lime: [0, 255, 0],
+        aqua: [0, 255, 255], cyan: [0, 255, 255], magenta: [255, 0, 255], teal: [0, 128, 128],
+        gold: [255, 215, 0], brown: [165, 42, 42], crimson: [220, 20, 60], indigo: [75, 0, 130],
+        violet: [238, 130, 238], skyblue: [135, 206, 235], tomato: [255, 99, 71], salmon: [250, 128, 114],
+        khaki: [240, 230, 140], beige: [245, 245, 220], darkgray: [169, 169, 169], lightgray: [211, 211, 211],
+        darkblue: [0, 0, 139], lightblue: [173, 216, 230], darkgreen: [0, 100, 0], lightgreen: [144, 238, 144],
+        slateblue: [106, 90, 205], steelblue: [70, 130, 180], orangered: [255, 69, 0], deepskyblue: [0, 191, 255]
+      };
+
+      var PALETTE = [
+        ['#0d6efd', '#6610f2', '#6f42c1', '#d63384', '#dc3545', '#fd7e14', '#ffc107', '#198754', '#20c997', '#0dcaf0'],
+        ['#f8f9fa', '#adb5bd', '#6c757d', '#495057', '#343a40', '#212529', '#000000', '#ffffff', '#198754', '#0d6efd'],
+        ['#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4', '#009688', '#4caf50', '#8bc34a'],
+        ['#ff5722', '#795548', '#607d8b', '#f44336', '#e91e63', '#ffc107', '#ff9800', '#ffeb3b', '#cddc39', '#00e5ff']
+      ];
+
+      function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+      function hex2(r) { return clamp(Math.round(r), 0, 255).toString(16).padStart(2, '0'); }
+      function rgbToHex(r, g, b) { return '#' + hex2(r) + hex2(g) + hex2(b); }
+
+      function hexToRgb(hex) {
+        hex = hex.replace('#', '');
+        if (hex.length === 3) { hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]; }
+        return [parseInt(hex.substr(0, 2), 16), parseInt(hex.substr(2, 2), 16), parseInt(hex.substr(4, 2), 16)];
+      }
+
+      function rgbToHsl(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, h = 0, s = 0, l = (max + min) / 2;
+        if (d) {
+          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+          if (max === r) { h = ((g - b) / d + (g < b ? 6 : 0)); }
+          else if (max === g) { h = (b - r) / d + 2; }
+          else { h = (r - g) / d + 4; }
+          h *= 60;
+        }
+        return [Math.round(h), Math.round(s * 100), Math.round(l * 100)];
+      }
+
+      function hslToRgb(h, s, l) {
+        h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+        var c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2, rgb;
+        if (h < 60) { rgb = [c, x, 0]; } else if (h < 120) { rgb = [x, c, 0]; } else if (h < 180) { rgb = [0, c, x]; }
+        else if (h < 240) { rgb = [0, x, c]; } else if (h < 300) { rgb = [x, 0, c]; } else { rgb = [c, 0, x]; }
+        return [(rgb[0] + m) * 255, (rgb[1] + m) * 255, (rgb[2] + m) * 255].map(function (v) { return Math.round(v); });
+      }
+
+      function rgbToHsv(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        var max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, h = 0, s = 0;
+        if (d) {
+          s = d / max;
+          if (max === r) { h = (g - b) / d + (g < b ? 6 : 0); }
+          else if (max === g) { h = (b - r) / d + 2; }
+          else { h = (r - g) / d + 4; }
+          h *= 60;
+        }
+        return [Math.round(h), Math.round(s * 100), Math.round(max * 100)];
+      }
+
+      function rgbToCmyk(r, g, b) {
+        r /= 255; g /= 255; b /= 255;
+        var k = 1 - Math.max(r, g, b);
+        if (k === 1) { return [0, 0, 0, 100]; }
+        return [
+          Math.round((1 - r - k) / (1 - k) * 100),
+          Math.round((1 - g - k) / (1 - k) * 100),
+          Math.round((1 - b - k) / (1 - k) * 100),
+          Math.round(k * 100)
+        ];
+      }
+
+      function luminance(r, g, b) {
+        var a = [r, g, b].map(function (v) {
+          v /= 255;
+          return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+      }
+      function contrast(rgb1, rgb2) {
+        var l1 = luminance(rgb1[0], rgb1[1], rgb1[2]);
+        var l2 = luminance(rgb2[0], rgb2[1], rgb2[2]);
+        return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      }
+      function wcagLevel(ratio) {
+        if (ratio >= 7) { return 'AAA'; }
+        if (ratio >= 4.5) { return 'AA'; }
+        if (ratio >= 3) { return 'AA 大字'; }
+        return '不达标';
+      }
+
+      function parseColor(str) {
+        str = (str || '').trim().toLowerCase();
+        if (!str) { return null; }
+        if (NAMED[str]) { return NAMED[str]; }
+        var m = str.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/);
+        if (m) { return hexToRgb(m[1]); }
+        m = str.match(/^rgba?\(([^)]+)\)$/);
+        if (m) {
+          var p = m[1].split(',').map(function (v) { return parseFloat(v); });
+          if (p.length >= 3 && p.slice(0, 3).every(function (v) { return v >= 0 && v <= 255; })) {
+            return [Math.round(p[0]), Math.round(p[1]), Math.round(p[2])];
+          }
+        }
+        m = str.match(/^hsla?\(([^)]+)\)$/);
+        if (m) {
+          var q = m[1].split(',').map(function (v) { return parseFloat(v); });
+          if (q.length >= 3 && q[1] <= 100 && q[2] <= 100) { return hslToRgb(q[0], q[1], q[2]); }
+        }
+        return null;
+      }
+
+      function copyText(text, cb) {
+        navigator.clipboard.writeText(text).then(function () { if (cb) { cb(); } }).catch(function () {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy'); document.body.removeChild(ta);
+          if (cb) { cb(); }
+        });
+      }
+
+      var current = [79, 70, 229];
+
+      function renderAll() {
+        var r = current[0], g = current[1], b = current[2];
+        var hex = rgbToHex(r, g, b);
+        var hsl = rgbToHsl(r, g, b), hsv = rgbToHsv(r, g, b), cmyk = rgbToCmyk(r, g, b);
+        var rgba = 'rgba(' + r + ', ' + g + ', ' + b + ', 1)';
+
+        document.getElementById('previewBox').style.background = hex;
+        document.getElementById('colorPicker').value = hex;
+        document.getElementById('colorInput').value = hex;
+
+        var fmts = [
+          ['HEX', hex.toUpperCase()],
+          ['RGB', 'rgb(' + r + ', ' + g + ', ' + b + ')'],
+          ['RGBA', rgba],
+          ['HSL', 'hsl(' + hsl[0] + ', ' + hsl[1] + '%, ' + hsl[2] + '%)'],
+          ['HSV', 'hsv(' + hsv[0] + ', ' + hsv[1] + '%, ' + hsv[2] + '%)'],
+          ['CMYK', 'cmyk(' + cmyk[0] + '%, ' + cmyk[1] + '%, ' + cmyk[2] + '%, ' + cmyk[3] + '%)']
+        ];
+        document.getElementById('fmtList').innerHTML = fmts.map(function (f) {
+          return '<div class="col mb-2"><div class="fmt-row d-flex justify-content-between align-items-center border rounded px-2 py-1" data-copy="' + f[1] + '" role="button" title="点击复制">' +
+            '<span class="text-secondary small me-2">' + f[0] + '</span>' +
+            '<span class="small font-monospace text-truncate">' + f[1] + '</span></div></div>';
+        }).join('');
+        Array.prototype.forEach.call(document.querySelectorAll('.fmt-row'), function (el) {
+          el.addEventListener('click', function () {
+            copyText(el.getAttribute('data-copy'), function () {
+              el.classList.add('bg-primary-subtle');
+              setTimeout(function () { el.classList.remove('bg-primary-subtle'); }, 600);
+            });
+          });
+        });
+
+        // 对比度
+        var cw = contrast(current, [255, 255, 255]), cb = contrast(current, [0, 0, 0]);
+        var better = cw >= cb ? '白字' : '黑字';
+        document.getElementById('contrastInfo').innerHTML =
+          '<span class="px-2 py-1 border rounded" style="background:#fff;color:' + hex + '">白字对比 ' + cw.toFixed(2) + '（' + wcagLevel(cw) + '）</span>' +
+          '<span class="px-2 py-1 border rounded" style="background:#000;color:' + hex + '">黑字对比 ' + cb.toFixed(2) + '（' + wcagLevel(cb) + '）</span>' +
+          '<span class="text-secondary align-self-center">建议搭配：<b>' + better + '</b></span>';
+
+        // 明暗色阶：与白色/黑色混合 0%~90%
+        function mixTo(target, ratio) {
+          return [0, 1, 2].map(function (i) { return Math.round(current[i] + (target[i] - current[i]) * ratio); });
+        }
+        var scaleRow = function (arr) {
+          return '<div class="d-flex rounded overflow-hidden border" style="height:38px">' + arr.map(function (c) {
+            var h = rgbToHex(c[0], c[1], c[2]);
+            return '<div class="scale-cell flex-fill d-flex align-items-center justify-content-center" role="button" data-hex="' + h + '" ' +
+              'style="background:' + h + ';font-size:10px;color:' + (contrast(c, [0, 0, 0]) > 4.5 ? '#00000099' : '#ffffffb3') + '">' + h.slice(1) + '</div>';
+          }).join('') + '</div>';
+        };
+        var tints = [], shades = [];
+        for (var i = 9; i >= 1; i--) { tints.push(mixTo([255, 255, 255], i / 10)); }
+        tints.unshift(current);
+        for (var j = 1; j <= 9; j++) { shades.push(mixTo([0, 0, 0], j / 10)); }
+        document.getElementById('scaleWrap').innerHTML =
+          '<div class="text-secondary small">变亮</div>' + scaleRow(tints) +
+          '<div class="text-secondary small">变暗</div>' + scaleRow(shades);
+        bindCells();
+
+        // 配色方案
+        function schemeRow(title, list) {
+          return '<div><div class="text-secondary small mb-1">' + title + '</div>' + scaleRow(list) + '</div>';
+        }
+        var comp = hslToRgb(hsl[0] + 180, hsl[1], hsl[2]);
+        var tri1 = hslToRgb(hsl[0] + 120, hsl[1], hsl[2]);
+        var tri2 = hslToRgb(hsl[0] + 240, hsl[1], hsl[2]);
+        var ana1 = hslToRgb(hsl[0] + 30, hsl[1], hsl[2]);
+        var ana2 = hslToRgb(hsl[0] - 30, hsl[1], hsl[2]);
+        document.getElementById('schemeWrap').innerHTML =
+          schemeRow('互补色', [current, comp]) +
+          schemeRow('三角色', [current, tri1, tri2]) +
+          schemeRow('类似色', [ana1, current, ana2]);
+        bindCells();
+      }
+
+      function bindCells() {
+        Array.prototype.forEach.call(document.querySelectorAll('.scale-cell'), function (el) {
+          el.onclick = function () { applyHex(el.getAttribute('data-hex')); };
+        });
+      }
+
+      function applyHex(hex) {
+        current = hexToRgb(hex);
+        renderAll();
+      }
+
+      document.getElementById('colorPicker').addEventListener('input', function () {
+        applyHex(this.value);
+      });
+      document.getElementById('parseBtn').addEventListener('click', function () {
+        var err = document.getElementById('colorErr');
+        var parsed = parseColor(document.getElementById('colorInput').value);
+        if (!parsed) {
+          err.textContent = '无法解析该颜色，支持格式：#fff / #ffffff / rgb(79,70,229) / rgba(...) / hsl(243,75%,59%) / 英文名（如 red）';
+          err.classList.remove('d-none');
+          return;
+        }
+        err.classList.add('d-none');
+        current = parsed;
+        renderAll();
+      });
+      document.getElementById('colorInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { document.getElementById('parseBtn').click(); }
+      });
+
+      // 预设色板
+      document.getElementById('paletteWrap').innerHTML = PALETTE.map(function (row) {
+        return '<div class="d-flex gap-2">' + row.map(function (hex) {
+          return '<div role="button" class="rounded border shadow-sm" data-hex="' + hex + '" title="' + hex + '" ' +
+            'style="width:44px;height:44px;background:' + hex + '"></div>';
+        }).join('') + '</div>';
+      }).join('');
+      Array.prototype.forEach.call(document.querySelectorAll('#paletteWrap [data-hex]'), function (el) {
+        el.addEventListener('click', function () { applyHex(el.getAttribute('data-hex')); });
+      });
+
+      renderAll();
+    })();
+  </script>
+{% endblock %}

@@ -40,7 +40,8 @@
       <a class="nav-link {% if request.resolver_match.url_name == 'timestamp_page' %}active{% endif %}"
          href="{% url 'tools:timestamp_page' %}"><i class="bi bi-clock-history"></i> 时间戳转换</a>
       <a class="nav-link" href="#"><i class="bi bi-key"></i> UUID 生成</a>
-      <a class="nav-link" href="#"><i class="bi bi-palette"></i> 颜色工具</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'color_page' %}active{% endif %}"
+         href="{% url 'tools:color_page' %}"><i class="bi bi-palette"></i> 颜色工具</a>
 
       <p class="nav-section">图片处理</p>
       <a class="nav-link {% if request.resolver_match.url_name == 'icon_list' %}active{% endif %}"
