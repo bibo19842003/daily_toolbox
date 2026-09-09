@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}时间戳转换{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <h1 class="page-title">时间戳转换</h1>
+    <p class="page-subtitle">Unix 时间戳与日期时间互转，支持秒 / 毫秒 / 微秒 / 纳秒自动识别</p>
+  </div>
+
+  <div class="row g-4">
+    <!-- 当前时间戳 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-3">
+          <div>
+            <h6 class="fw-semibold mb-2"><i class="bi bi-stopwatch me-1"></i>当前时间戳</h6>
+            <div class="d-flex flex-wrap gap-4">
+              <div>
+                <div class="text-secondary small">秒（10 位）</div>
+                <div class="fs-3 fw-bold font-monospace" id="nowSec">—</div>
+              </div>
+              <div>
+                <div class="text-secondary small">毫秒（13 位）</div>
+                <div class="fs-3 fw-bold font-monospace text-primary" id="nowMs">—</div>
+              </div>
+              <div>
+                <div class="text-secondary small">现在时间</div>
+                <div class="fs-5 fw-semibold" id="nowDate">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 时间戳 → 日期 -->
+    <div class="col-lg-6">
+      <div class="card stat-card h-100">
+        <div class="card-body">
+          <h6 class="fw-semibold mb-3"><i class="bi bi-arrow-right-circle me-1"></i>时间戳 → 日期时间</h6>
+          <div class="input-group mb-3">
+            <input type="text" class="form-control font-monospace" id="tsInput" placeholder="输入时间戳，如 1796918400 或 1796918400000">
+            <button class="btn btn-outline-secondary" id="tsNowBtn" type="button">当前</button>
+            <button class="btn btn-primary" id="tsConvBtn" type="button">转换</button>
+          </div>
+          <div class="d-none alert alert-warning small py-2" id="tsErr"></div>
+          <div id="tsResult"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 日期 → 时间戳 -->
+    <div class="col-lg-6">
+      <div class="card stat-card h-100">
+        <div class="card-body">
+          <h6 class="fw-semibold mb-3"><i class="bi bi-arrow-left-circle me-1"></i>日期时间 → 时间戳</h6>
+          <div class="row g-2 mb-3">
+            <div class="col-7">
+              <input type="datetime-local" class="form-control" id="dtInput" step="1">
+            </div>
+            <div class="col-5 d-flex gap-2">
+              <select class="form-select" id="dtUnit">
+                <option value="1" selected>秒</option>
+                <option value="1000">毫秒</option>
+              </select>
+              <button class="btn btn-outline-secondary" id="dtNowBtn" type="button" title="填入当前时间"><i class="bi bi-clock"></i></button>
+            </div>
+          </div>
+          <button class="btn btn-primary mb-3" id="dtConvBtn" type="button">转换</button>
+          <div class="d-none alert alert-warning small py-2" id="dtErr"></div>
+          <div class="input-group d-none" id="dtResultRow">
+            <input type="text" class="form-control font-monospace fw-semibold" id="dtResult" readonly>
+            <button class="btn btn-outline-primary" id="dtCopyBtn" type="button"><i class="bi bi-clipboard"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+
+      function pad(n) { return String(n).padStart(2, '0'); }
+      function fmtLocal(d) {
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+          pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      }
+      function relative(diffMs) {
+        var future = diffMs < 0;
+        var s = Math.floor(Math.abs(diffMs) / 1000);
+        var units = [[86400, '天'], [3600, '小时'], [60, '分钟'], [1, '秒']];
+        for (var i = 0; i < units.length; i++) {
+          if (s >= units[i][0]) {
+            return future ? '还有 ' + Math.floor(s / units[i][0]) + ' ' + units[i][1] : Math.floor(s / units[i][0]) + ' ' + units[i][1] + '前';
+          }
+        }
+        return future ? '即将到来' : '刚刚';
+      }
+      function kv(label, value, mono) {
+        return '<div class="d-flex py-1" style="border-bottom:1px dashed #e9edf3">' +
+          '<div class="text-secondary small" style="width:110px;flex-shrink:0">' + label + '</div>' +
+          '<div class="small fw-semibold' + (mono ? ' font-monospace' : '') + '">' + value + '</div></div>';
+      }
+
+      // 当前时间戳实时刷新
+      function tick() {
+        var now = new Date();
+        document.getElementById('nowSec').textContent = Math.floor(now.getTime() / 1000);
+        document.getElementById('nowMs').textContent = now.getTime();
+        document.getElementById('nowDate').textContent = fmtLocal(now);
+      }
+      tick();
+      setInterval(tick, 250);
+
+      // 时间戳 → 日期
+      function showTsErr(msg) {
+        var el = document.getElementById('tsErr');
+        if (msg) { el.textContent = msg; el.classList.remove('d-none'); }
+        else { el.classList.add('d-none'); }
+      }
+      function convertTs() {
+        showTsErr('');
+        var raw = document.getElementById('tsInput').value.trim();
+        var box = document.getElementById('tsResult');
+        if (!raw) { box.innerHTML = ''; return; }
+        if (!/^-?\d+$/.test(raw)) { showTsErr('请输入纯数字时间戳（可为负数表示 1970 年前）'); box.innerHTML = ''; return; }
+        var n = Number(raw);
+        var absLen = raw.replace('-', '').length;
+        var ms;
+        if (absLen <= 11) { ms = n * 1000; }            // 秒
+        else if (absLen <= 14) { ms = n; }               // 毫秒
+        else if (absLen <= 17) { ms = n / 1000; }        // 微秒
+        else { ms = n / 1000000; }                       // 纳秒
+        var d = new Date(ms);
+        if (isNaN(d.getTime())) { showTsErr('数值超出可表示的时间范围'); box.innerHTML = ''; return; }
+        var detected = absLen <= 11 ? '秒（10 位）' : absLen <= 14 ? '毫秒（13 位）' : absLen <= 17 ? '微秒（16 位）' : '纳秒（19 位）';
+        box.innerHTML =
+          kv('识别精度', detected, false) +
+          kv('本地时间', fmtLocal(d), true) +
+          kv('星期', '星期' + WEEK[d.getDay()], false) +
+          kv('UTC 时间', d.toUTCString(), true) +
+          kv('ISO 8601', d.toISOString(), true) +
+          kv('相对时间', relative(Date.now() - ms), false);
+      }
+      document.getElementById('tsConvBtn').addEventListener('click', convertTs);
+      document.getElementById('tsInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { convertTs(); }
+      });
+      document.getElementById('tsNowBtn').addEventListener('click', function () {
+        document.getElementById('tsInput').value = Date.now();
+        convertTs();
+      });
+
+      // 日期 → 时间戳
+      function showDtErr(msg) {
+        var el = document.getElementById('dtErr');
+        if (msg) { el.textContent = msg; el.classList.remove('d-none'); }
+        else { el.classList.add('d-none'); }
+      }
+      document.getElementById('dtNowBtn').addEventListener('click', function () {
+        var d = new Date();
+        document.getElementById('dtInput').value =
+          d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+          'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      });
+      document.getElementById('dtConvBtn').addEventListener('click', function () {
+        showDtErr('');
+        var v = document.getElementById('dtInput').value;
+        var row = document.getElementById('dtResultRow');
+        if (!v) { showDtErr('请先选择日期时间'); row.classList.add('d-none'); return; }
+        var d = new Date(v);
+        if (isNaN(d.getTime())) { showDtErr('日期格式无法解析'); row.classList.add('d-none'); return; }
+        var unit = document.getElementById('dtUnit').value;
+        document.getElementById('dtResult').value = unit === '1' ? Math.floor(d.getTime() / 1000) : d.getTime();
+        row.classList.remove('d-none');
+      });
+      document.getElementById('dtCopyBtn').addEventListener('click', function () {
+        var val = document.getElementById('dtResult').value;
+        if (!val) { return; }
+        function ok() {
+          var btn = document.getElementById('dtCopyBtn');
+          btn.innerHTML = '<i class="bi bi-check2"></i>';
+          setTimeout(function () { btn.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+        }
+        navigator.clipboard.writeText(val).then(ok).catch(function () {
+          var ta = document.createElement('textarea');
+          ta.value = val;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          ok();
+        });
+      });
+    })();
+  </script>
+{% endblock %}

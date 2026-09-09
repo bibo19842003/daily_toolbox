@@ -37,7 +37,8 @@
 
       <p class="nav-section">开发辅助</p>
       <a class="nav-link" href="#"><i class="bi bi-terminal"></i> 正则测试</a>
-      <a class="nav-link" href="#"><i class="bi bi-clock-history"></i> 时间戳转换</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'timestamp_page' %}active{% endif %}"
+         href="{% url 'tools:timestamp_page' %}"><i class="bi bi-clock-history"></i> 时间戳转换</a>
       <a class="nav-link" href="#"><i class="bi bi-key"></i> UUID 生成</a>
       <a class="nav-link" href="#"><i class="bi bi-palette"></i> 颜色工具</a>
 
