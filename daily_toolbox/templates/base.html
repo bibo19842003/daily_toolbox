@@ -55,6 +55,8 @@
       <p class="nav-section">电脑相关</p>
       <a class="nav-link {% if request.resolver_match.url_name == 'wifi_page' %}active{% endif %}"
          href="{% url 'tools:wifi_page' %}"><i class="bi bi-wifi"></i> 本机wifi信息</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'hardware_page' %}active{% endif %}"
+         href="{% url 'tools:hardware_page' %}"><i class="bi bi-flower3"></i> 硬件信息</a>
     </nav>
   </aside>
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>

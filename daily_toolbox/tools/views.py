@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import os
+import platform
 import re
 import shutil
 import socket
@@ -8,9 +9,13 @@ import ssl
 import subprocess
 import time
 import urllib.request
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+
+import psutil
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -529,4 +534,336 @@ def wifi_password(request):
         "password": pm.group(1).strip(),
         "auth": auth.group(1).strip() if auth else "",
         "cipher": cipher.group(1).strip() if cipher else "",
+    })
+
+
+# ------------------------------------------------------------
+# 硬件信息（移植自 bibo19842003/tools_script hardware_info.py）
+# ------------------------------------------------------------
+
+def hardware_page(request):
+    return render(request, "hardware.html")
+
+
+_PS_HW_SCRIPT = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+@{
+  cpu       = Get-CimInstance Win32_Processor       | Select-Object Name,MaxClockSpeed
+  memory    = Get-CimInstance Win32_PhysicalMemory  | Select-Object Capacity,Speed,Manufacturer,PartNumber,SMBIOSMemoryType,DeviceLocator,BankLabel
+  disks     = Get-CimInstance Win32_DiskDrive       | Select-Object Model,Size,SerialNumber,MediaType
+  gpu       = Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion,CurrentRefreshRate,PNPDeviceID
+  vram      = Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}' -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue; $q = $p.'HardwareInformation.qwMemorySize'; if ($null -eq $q) { $q = $p.'HardwareInformation.MemorySize' }; if ($null -ne $q -and $q -gt 0) { [PSCustomObject]@{ device = $p.MatchingDeviceId; bytes = $q } } }
+  baseboard = Get-CimInstance Win32_BaseBoard       | Select-Object Manufacturer,Product,SerialNumber,Version
+  bios      = Get-CimInstance Win32_BIOS            | Select-Object Manufacturer,SerialNumber,SMBIOSBIOSVersion,ReleaseDate
+  monitor   = Get-CimInstance Win32_DesktopMonitor  | Select-Object Name,ScreenWidth,ScreenHeight,MonitorType
+} | ConvertTo-Json -Compress -Depth 4
+"""
+
+
+def _cim_batch():
+    """一次 PowerShell 调用批量获取全部 WMI 硬件数据。"""
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", _PS_HW_SCRIPT],
+            capture_output=True, timeout=45,
+        )
+        data = json.loads(completed.stdout.decode("utf-8", "replace") or "{}")
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _as_list(value):
+    """ConvertTo-Json 单条结果返回对象、多条返回数组，统一成数组。"""
+    if value is None:
+        return []
+    if isinstance(value, str):  # 防御：内层 JSON 字符串需再解析
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return value if isinstance(value, list) else [value]
+
+
+def _memory_chip_vendor(partnumber):
+    """根据内存型号识别颗粒厂商（移植原脚本 get_memory_manufacturer_from_partnumber）。"""
+    if not partnumber:
+        return "未知"
+    partnumber = partnumber.upper().strip()
+
+    if partnumber.startswith("KF"):
+        brand = "kingston_fury"
+    elif partnumber.startswith("KVR"):
+        brand = "kingston"
+    elif partnumber.startswith("F4"):
+        brand = "gskill"
+    elif partnumber.startswith(("CM", "CP")):
+        brand = "corsair"
+    elif partnumber.startswith(("BL", "CT")):
+        brand = "crucial"
+    else:
+        brand = None
+
+    if brand in ("kingston_fury", "kingston"):
+        return {
+            "X": "Micron（镁光）", "S": "Samsung（三星）", "H": "SK Hynix（海力士）",
+            "N": "Nanya（南亚）", "C": "CXMT（长鑫）",
+        }.get(partnumber[-1], "未知")
+
+    if brand == "gskill":
+        clean_part = partnumber.replace("-", "").replace("_", "")
+        suffix_4 = clean_part[-4:] if len(clean_part) >= 4 else clean_part
+        if suffix_4 in ("10BC", "10CB", "10D", "10ND"):
+            return "Samsung B-die（三星）"
+        if suffix_4 in ("10CC", "10CR"):
+            return "Samsung C-die（三星）"
+        if suffix_4 in ("20CR", "21CR", "20CK", "21CK"):
+            return "SK Hynix CJR（海力士）"
+        if suffix_4 in ("20JR", "21JR", "20JK", "21JK"):
+            return "SK Hynix JJR（海力士）"
+        if suffix_4 in ("30XR", "31XR", "30X", "31X"):
+            return "Micron D9/C9（镁光）"
+        if suffix_4 in ("33XR", "33X"):
+            return "Spectek 大S（镁光降级片）"
+        if suffix_4 in ("60NR", "61NR", "60N", "61N"):
+            return "Nanya（南亚）"
+        if suffix_4 in ("70CR", "71CR", "70C", "71C"):
+            return "CXMT（长鑫）"
+        return "未知"
+
+    if brand == "corsair":
+        ver = re.search(r"[Vv][Ee][Rr]\s*(\d)\.(\d+)", partnumber)
+        if ver:
+            major, minor = ver.group(1), ver.group(2)
+            return {
+                "3": f"Micron/Spectek（镁光系）Ver {major}.{minor}",
+                "4": f"Samsung（三星）Ver {major}.{minor}",
+                "5": f"SK Hynix（海力士）Ver {major}.{minor}",
+            }.get(major, "未知")
+        return "未知"
+
+    if partnumber.startswith(("M3", "M4", "M5")):
+        return "Samsung（三星）- M系列"
+    if partnumber.startswith(("K4", "K5")):
+        return "Samsung（三星）- K系列"
+    if partnumber.startswith(("H9", "H8", "HT")):
+        return "SK Hynix（海力士）"
+    if partnumber.startswith(("MTA", "MT")):
+        return "Micron（镁光）"
+    if partnumber.startswith("D9"):
+        return "Micron D9（镁光）"
+    if partnumber.startswith("NT"):
+        return "Nanya（南亚）"
+    return "未知（可能为小厂或特殊编码）"
+
+
+_MEMORY_TYPE_MAP = {"20": "DDR", "21": "DDR2", "24": "DDR3", "26": "DDR4", "34": "DDR5"}
+
+
+def _gb(size, digits=2):
+    """字节数转 GB 字符串。"""
+    try:
+        return f"{int(size) / (1024 ** 3):.{digits}f} GB"
+    except (TypeError, ValueError):
+        return "未知"
+
+
+def _hw_network():
+    """主机名、MAC 与各适配器网络配置（解析 ipconfig /all）。"""
+    mac = ":".join(f"{(uuid.getnode() >> shift) & 0xFF:02x}" for shift in range(40, -1, -8))
+    adapters, current = [], None
+    try:
+        completed = subprocess.run(["ipconfig", "/all"], capture_output=True, timeout=20)
+        text = completed.stdout.decode("gbk", "replace")
+    except Exception:
+        text = ""
+
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if ("适配器" in s or "adapter" in s.lower()) and ":" in s and not line.startswith((" ", "\t")):
+            name = s.split(":", 1)[0]
+            for kw in ("适配器", "adapter"):
+                name = name.replace(kw, "").strip(" .:")
+            current = {"name": name, "props": []}
+            adapters.append(current)
+            continue
+        if current is None or ":" not in s:
+            continue
+        key, _, value = s.partition(":")
+        key, value = key.strip(), value.strip()
+        if not value or "媒体已断开" in value or "Media disconnected" in value:
+            continue
+        label = None
+        if "IPv4" in key:
+            label = "IP 地址"
+        elif "子网掩码" in key or "Subnet" in key:
+            label = "子网掩码"
+        elif "默认网关" in key or "Default Gateway" in key:
+            label = "默认网关"
+        elif "DNS" in key:
+            label = "DNS"
+        elif ("物理地址" in key or "Physical Address" in key) and "媒体" not in key:
+            label = "MAC 地址"
+        if label:
+            current["props"].append([label, value])
+
+    return {
+        "hostname": socket.gethostname(),
+        "mac": mac,
+        "adapters": [a for a in adapters if a["props"]],
+    }
+
+
+@require_GET
+def hardware_info(request):
+    """采集整机硬件信息，返回 JSON。"""
+    cim = _cim_batch()
+
+    # 系统
+    boot_ts = psutil.boot_time()
+    boot_time = datetime.fromtimestamp(boot_ts)
+    uptime = datetime.now() - boot_time
+    system = [
+        ["操作系统", f"{platform.system()} {platform.release()}"],
+        ["系统版本", platform.version()],
+        ["系统架构", platform.machine()],
+        ["计算机名", socket.gethostname()],
+        ["当前用户", psutil.users()[0].name if psutil.users() else "未知"],
+        ["开机时间", boot_time.strftime("%Y-%m-%d %H:%M:%S")],
+        ["运行时长", f"{uptime.days}天 {uptime.seconds // 3600}小时 {(uptime.seconds % 3600) // 60}分钟"],
+    ]
+
+    # CPU
+    freq = psutil.cpu_freq()
+    cpu_cim = _as_list(cim.get("cpu"))
+    cpu_name = str(cpu_cim[0].get("Name", "") or "").strip() if cpu_cim and isinstance(cpu_cim[0], dict) else ""
+    cpu = [
+        ["型号", cpu_name or platform.processor()],
+        ["处理器", platform.processor()],
+        ["物理核心数", psutil.cpu_count(logical=False)],
+        ["逻辑核心数", psutil.cpu_count(logical=True)],
+        ["当前频率", f"{freq.current:.0f} MHz" if freq else "不支持"],
+        ["最大频率", f"{freq.max:.0f} MHz" if freq and freq.max else "不支持"],
+        ["CPU 使用率", f"{psutil.cpu_percent(interval=1):.1f}%"],
+    ]
+
+    # 内存
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    memory_overview = [
+        ["物理内存总量", _gb(mem.total)],
+        ["已使用内存", _gb(mem.used)],
+        ["可用内存", _gb(mem.available)],
+        ["内存使用率", f"{mem.percent}%"],
+        ["交换内存总量", _gb(swap.total)],
+        ["交换内存使用率", f"{swap.percent}%"],
+    ]
+    memory_modules = []
+    for chip in _as_list(cim.get("memory")):
+        mem_type = _MEMORY_TYPE_MAP.get(str(chip.get("SMBIOSMemoryType", "")), str(chip.get("SMBIOSMemoryType", "")))
+        partnumber = str(chip.get("PartNumber", "") or "").strip()
+        memory_modules.append({
+            "slot": str(chip.get("DeviceLocator") or chip.get("BankLabel") or "未知插槽"),
+            "capacity": _gb(chip.get("Capacity")),
+            "speed": f"{chip.get('Speed')} MHz" if chip.get("Speed") else "未知",
+            "type": mem_type or "未知",
+            "manufacturer": str(chip.get("Manufacturer", "") or "").strip() or "未知",
+            "partnumber": partnumber or "未知",
+            "vendor": _memory_chip_vendor(partnumber),
+        })
+
+    # 磁盘
+    partitions = []
+    for part in psutil.disk_partitions():
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+        except (PermissionError, OSError):
+            continue
+        partitions.append({
+            "device": part.device,
+            "fstype": part.fstype or "未知",
+            "total": _gb(usage.total),
+            "used": _gb(usage.used),
+            "free": _gb(usage.free),
+            "percent": f"{usage.percent}%",
+        })
+    physical_disks = []
+    for disk in _as_list(cim.get("disks")):
+        physical_disks.append({
+            "model": str(disk.get("Model", "") or "未知").strip(),
+            "size": _gb(disk.get("Size")),
+            "serial": str(disk.get("SerialNumber", "") or "").strip() or "未知",
+            "media": str(disk.get("MediaType", "") or "未知").strip(),
+        })
+
+    # 显卡（显存：注册表 qwMemorySize 为 uint64 精确值；AdapterRAM 是 uint32，
+    # 大于 4GB 的显卡会被截断，仅作回退）
+    vram_entries = []
+    for entry in _as_list(cim.get("vram")):
+        if isinstance(entry, dict) and entry.get("device"):
+            vram_entries.append((str(entry["device"]).strip().lower(), entry.get("bytes")))
+
+    gpus = []
+    for gpu in _as_list(cim.get("gpu")):
+        pnp = str(gpu.get("PNPDeviceID", "") or "").strip().lower()
+        vram_bytes = gpu.get("AdapterRAM")
+        for device, size in vram_entries:
+            if device and (device == pnp or device in pnp or pnp in device):
+                vram_bytes = size
+                break
+        gpus.append({
+            "name": str(gpu.get("Name", "") or "未知").strip(),
+            "vram": _gb(vram_bytes) if vram_bytes and str(vram_bytes) not in ("0", "") else "",
+            "driver": str(gpu.get("DriverVersion", "") or "").strip(),
+            "refresh": f"{gpu.get('CurrentRefreshRate')} Hz" if gpu.get("CurrentRefreshRate") else "",
+        })
+
+    # 主板 / BIOS
+    baseboard = _as_list(cim.get("baseboard"))
+    baseboard = baseboard[0] if baseboard else {}
+    bios_list = _as_list(cim.get("bios"))
+    bios = bios_list[0] if bios_list else {}
+    motherboard = [
+        ["主板制造商", str(baseboard.get("Manufacturer", "") or "未知").strip()],
+        ["产品名称", str(baseboard.get("Product", "") or "未知").strip()],
+        ["序列号", str(baseboard.get("SerialNumber", "") or "未知").strip()],
+        ["版本", str(baseboard.get("Version", "") or "未知").strip()],
+        ["BIOS 制造商", str(bios.get("Manufacturer", "") or "未知").strip()],
+        ["BIOS 版本", str(bios.get("SMBIOSBIOSVersion", "") or "未知").strip()],
+        ["BIOS 序列号", str(bios.get("SerialNumber", "") or "未知").strip()],
+        ["BIOS 发布日期", str(bios.get("ReleaseDate", "") or "未知").strip()],
+    ]
+
+    # 显示器（现代系统常取不到，前端为空时隐藏）
+    monitors = [{
+        "name": str(m.get("Name", "") or "").strip() or "未知",
+        "resolution": f"{m.get('ScreenWidth')} x {m.get('ScreenHeight')}" if m.get("ScreenWidth") else "",
+        "type": str(m.get("MonitorType", "") or "").strip(),
+    } for m in _as_list(cim.get("monitor"))]
+
+    # 电池（台式机为 None）
+    try:
+        battery = psutil.sensors_battery()
+    except (AttributeError, OSError):
+        battery = None
+
+    return JsonResponse({
+        "ok": True,
+        "system": system,
+        "cpu": cpu,
+        "memory_overview": memory_overview,
+        "memory_modules": memory_modules,
+        "partitions": partitions,
+        "physical_disks": physical_disks,
+        "gpus": gpus,
+        "motherboard": motherboard,
+        "monitors": monitors,
+        "battery": {
+            "plugged": battery.power_plugged,
+            "percent": f"{battery.percent}%",
+        } if battery else None,
+        "network": _hw_network(),
     })

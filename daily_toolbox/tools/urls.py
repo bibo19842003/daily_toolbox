@@ -17,4 +17,6 @@ urlpatterns = [
     path("api/wifi/interfaces/", views.wifi_interfaces, name="wifi_interfaces"),
     path("api/wifi/profiles/", views.wifi_profiles, name="wifi_profiles"),
     path("api/wifi/password/", views.wifi_password, name="wifi_password"),
+    path("hardware/", views.hardware_page, name="hardware_page"),
+    path("api/hardware/", views.hardware_info, name="hardware_info"),
 ]

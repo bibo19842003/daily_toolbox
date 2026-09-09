@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}硬件信息{% endblock %}
+
+{% block content %}
+  <!-- 页面标题 -->
+  <div class="mb-4">
+    <h1 class="page-title">硬件信息</h1>
+    <p class="page-subtitle">采集本机 CPU、内存、磁盘、显卡、主板、网络等硬件信息（数据来源：psutil + Windows CIM）</p>
+  </div>
+
+  <!-- 加载中 -->
+  <div class="card stat-card mb-4" id="hwLoading">
+    <div class="card-body text-center py-5">
+      <span class="spinner-border text-primary"></span>
+      <p class="text-secondary small mt-3 mb-0">正在采集硬件信息，约需数秒…</p>
+    </div>
+  </div>
+
+  <div class="d-none" id="hwContent">
+    <div class="row g-4">
+
+      <!-- 系统信息 -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-windows me-1"></i>系统信息</h6>
+            <div id="systemList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CPU -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-cpu me-1"></i>CPU 信息</h6>
+            <div id="cpuList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 内存 -->
+      <div class="col-12">
+        <div class="card stat-card">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-memory me-1"></i>内存信息</h6>
+            <div class="row g-3 mb-4">
+              <div class="col-md-6"><div id="memoryList"></div></div>
+              <div class="col-md-6"><div id="memoryUsage"></div></div>
+            </div>
+            <h6 class="fw-semibold small text-secondary mb-2">内存条明细（含颗粒厂商识别）</h6>
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>插槽</th>
+                    <th>容量</th>
+                    <th>速度</th>
+                    <th>类型</th>
+                    <th>制造商</th>
+                    <th>型号</th>
+                    <th>颗粒厂商</th>
+                  </tr>
+                </thead>
+                <tbody id="moduleBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 磁盘 -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-device-hdd me-1"></i>磁盘分区</h6>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                  <tr><th>驱动器</th><th>类型</th><th>容量</th><th>已用</th><th>使用率</th></tr>
+                </thead>
+                <tbody id="partBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 物理磁盘 -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-device-ssd me-1"></i>物理磁盘</h6>
+            <div class="table-responsive">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                  <tr><th>型号</th><th>容量</th><th>介质</th><th>序列号</th></tr>
+                </thead>
+                <tbody id="diskBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 显卡 -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-gpu-card me-1"></i>显卡信息</h6>
+            <div id="gpuList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主板与 BIOS -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-motherboard me-1"></i>主板与 BIOS</h6>
+            <div id="boardList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 网络 -->
+      <div class="col-lg-6">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-ethernet me-1"></i>网络信息</h6>
+            <div id="netSummary" class="mb-3"></div>
+            <div id="adapterList" class="d-flex flex-column gap-3"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 显示器 / 电池 -->
+      <div class="col-lg-6 d-none" id="extraCard">
+        <div class="card stat-card h-100">
+          <div class="card-body">
+            <h6 class="fw-semibold mb-3"><i class="bi bi-display me-1"></i>显示器与电池</h6>
+            <div id="monitorList"></div>
+            <div id="batteryList"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 采集失败 -->
+  <div class="d-none alert alert-danger mt-4" id="hwError">
+    <i class="bi bi-exclamation-triangle me-1"></i>硬件信息采集失败，请稍后刷新重试。
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      // 键值对行
+      function kvRows(el, items) {
+        el.innerHTML = items.map(function (pair) {
+          return '<div class="d-flex py-1" style="border-bottom:1px dashed #e9edf3">' +
+            '<div class="text-secondary small" style="width:130px;flex-shrink:0">' + escapeHtml(pair[0]) + '</div>' +
+            '<div class="small fw-semibold">' + escapeHtml(pair[1]) + '</div></div>';
+        }).join('');
+      }
+
+      fetch('{% url 'tools:hardware_info' %}')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) throw new Error('bad response');
+          document.getElementById('hwLoading').classList.add('d-none');
+          document.getElementById('hwContent').classList.remove('d-none');
+
+          kvRows(document.getElementById('systemList'), data.system);
+          kvRows(document.getElementById('cpuList'), data.cpu);
+
+          // 内存：总览 + 使用情况分两列
+          kvRows(document.getElementById('memoryList'), data.memory_overview.slice(0, 4));
+          kvRows(document.getElementById('memoryUsage'), data.memory_overview.slice(4));
+
+          // 内存条明细
+          document.getElementById('moduleBody').innerHTML = data.memory_modules.map(function (m) {
+            return '<tr><td><code>' + escapeHtml(m.slot) + '</code></td>' +
+              '<td>' + escapeHtml(m.capacity) + '</td>' +
+              '<td>' + escapeHtml(m.speed) + '</td>' +
+              '<td><span class="badge bg-primary-subtle text-primary">' + escapeHtml(m.type) + '</span></td>' +
+              '<td>' + escapeHtml(m.manufacturer) + '</td>' +
+              '<td class="small">' + escapeHtml(m.partnumber) + '</td>' +
+              '<td><span class="badge bg-success-subtle text-success">' + escapeHtml(m.vendor) + '</span></td></tr>';
+          }).join('');
+
+          // 分区
+          document.getElementById('partBody').innerHTML = data.partitions.map(function (p) {
+            return '<tr><td><code>' + escapeHtml(p.device) + '</code></td>' +
+              '<td class="small">' + escapeHtml(p.fstype) + '</td>' +
+              '<td>' + escapeHtml(p.total) + '</td>' +
+              '<td>' + escapeHtml(p.used) + ' / ' + escapeHtml(p.free) + '</td>' +
+              '<td>' + escapeHtml(p.percent) + '</td></tr>';
+          }).join('');
+
+          // 物理磁盘
+          document.getElementById('diskBody').innerHTML = data.physical_disks.map(function (d) {
+            return '<tr><td class="small">' + escapeHtml(d.model) + '</td>' +
+              '<td>' + escapeHtml(d.size) + '</td>' +
+              '<td class="small">' + escapeHtml(d.media) + '</td>' +
+              '<td class="small text-secondary">' + escapeHtml(d.serial) + '</td></tr>';
+          }).join('');
+
+          // 显卡
+          document.getElementById('gpuList').innerHTML = data.gpus.map(function (g) {
+            var extra = [];
+            if (g.vram) extra.push('显存 ' + g.vram);
+            if (g.refresh) extra.push('刷新率 ' + g.refresh);
+            if (g.driver) extra.push('驱动 ' + g.driver);
+            return '<div class="mb-2 pb-2" style="border-bottom:1px dashed #e9edf3">' +
+              '<div class="small fw-semibold">' + escapeHtml(g.name) + '</div>' +
+              '<div class="text-secondary small">' + escapeHtml(extra.join(' · ') || '—') + '</div></div>';
+          }).join('');
+
+          // 主板与 BIOS
+          kvRows(document.getElementById('boardList'), data.motherboard);
+
+          // 网络
+          var net = data.network;
+          kvRows(document.getElementById('netSummary'), [['计算机名', net.hostname], ['本机 MAC', net.mac]]);
+          document.getElementById('adapterList').innerHTML = net.adapters.map(function (a) {
+            return '<div><div class="small fw-semibold mb-1"><i class="bi bi-hdd-network me-1"></i>' +
+              escapeHtml(a.name) + '</div>' + a.props.map(function (p) {
+                return '<div class="d-flex py-0 small"><div class="text-secondary" style="width:90px;flex-shrink:0">' +
+                  escapeHtml(p[0]) + '</div><div>' + escapeHtml(p[1]) + '</div></div>';
+              }).join('') + '</div>';
+          }).join('');
+
+          // 显示器 / 电池（有数据才显示卡片）
+          var hasMonitor = data.monitors && data.monitors.length;
+          var hasBattery = !!data.battery;
+          if (hasMonitor || hasBattery) {
+            document.getElementById('extraCard').classList.remove('d-none');
+            if (hasMonitor) {
+              document.getElementById('monitorList').innerHTML = data.monitors.map(function (m) {
+                var extra = [];
+                if (m.resolution) extra.push('分辨率 ' + m.resolution);
+                if (m.type) extra.push(m.type);
+                return '<div class="d-flex py-1" style="border-bottom:1px dashed #e9edf3">' +
+                  '<div class="small fw-semibold me-3">' + escapeHtml(m.name) + '</div>' +
+                  '<div class="text-secondary small">' + escapeHtml(extra.join(' · ') || '—') + '</div></div>';
+              }).join('');
+            }
+            if (hasBattery) {
+              document.getElementById('batteryList').innerHTML =
+                '<div class="d-flex py-1"><div class="text-secondary small" style="width:130px;flex-shrink:0">电池状态</div>' +
+                '<div class="small fw-semibold">' + escapeHtml(data.battery.percent) +
+                (data.battery.plugged ? '（已连接电源）' : '（使用电池）') + '</div></div>';
+            }
+          }
+        })
+        .catch(function () {
+          document.getElementById('hwLoading').classList.add('d-none');
+          document.getElementById('hwError').classList.remove('d-none');
+        });
+    })();
+  </script>
+{% endblock %}
