@@ -867,3 +867,48 @@ def hardware_info(request):
         } if battery else None,
         "network": _hw_network(),
     })
+
+
+# ------------------------------------------------------------
+# 编码转换
+# ------------------------------------------------------------
+
+def encode_page(request):
+    options = json.dumps(_ENCODE_CHARSETS, ensure_ascii=False)
+    return render(request, "encode.html", {"charset_options": options})
+
+
+# 白名单：既限定功能范围，也防止用户传入任意 codec（如 zlib/rot13 等二进制变换）
+_ENCODE_CHARSETS = {
+    "utf-8": "UTF-8",
+    "gbk": "GBK",
+    "gb2312": "GB2312",
+    "gb18030": "GB18030",
+    "big5": "Big5（繁体）",
+    "shift_jis": "Shift_JIS（日文）",
+    "latin-1": "Latin-1（ISO-8859-1）",
+    "utf-16": "UTF-16",
+}
+
+
+@require_POST
+def encode_charset(request):
+    """字符集转换（乱码修复）：把文本按源编码转成字节，再按目标编码解读。
+
+    典型场景：UTF-8 文本被误按 GBK 显示成"娴嬭瘯"，
+    此时选 源=GBK、目标=UTF-8 即可还原。
+    """
+    text = request.POST.get("text", "")
+    src = (request.POST.get("src") or "utf-8").lower()
+    dst = (request.POST.get("dst") or "utf-8").lower()
+    if src not in _ENCODE_CHARSETS or dst not in _ENCODE_CHARSETS:
+        return JsonResponse({"ok": False, "error": "不支持的编码类型"}, status=400)
+    if src == dst:
+        return JsonResponse({"ok": False, "error": "源编码与目标编码相同"}, status=400)
+    try:
+        # encode 用 replace：GB2312 等编码无法表示全部汉字时仍可继续
+        data = text.encode(src, errors="replace")
+        result = data.decode(dst, errors="replace")
+    except (UnicodeError, LookupError) as exc:
+        return JsonResponse({"ok": False, "error": f"转换失败：{exc}"}, status=400)
+    return JsonResponse({"ok": True, "result": result})

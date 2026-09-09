@@ -32,7 +32,8 @@
       <p class="nav-section">文本处理</p>
       <a class="nav-link" href="#"><i class="bi bi-braces"></i> JSON 格式化</a>
       <a class="nav-link" href="#"><i class="bi bi-file-earmark-diff"></i> 文本对比</a>
-      <a class="nav-link" href="#"><i class="bi bi-translate"></i> 编码转换</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'encode_page' %}active{% endif %}"
+         href="{% url 'tools:encode_page' %}"><i class="bi bi-translate"></i> 编码转换</a>
 
       <p class="nav-section">开发辅助</p>
       <a class="nav-link" href="#"><i class="bi bi-terminal"></i> 正则测试</a>

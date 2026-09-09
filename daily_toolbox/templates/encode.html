@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+
+{% block title %}编码转换{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <h1 class="page-title">编码转换</h1>
+    <p class="page-subtitle">URL / Base64 / Unicode 转义 / 十六进制 / HTML 实体 / ASCII / 字符集（乱码修复）</p>
+  </div>
+
+  <div class="row g-4">
+    <!-- 输入 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <label class="form-label fw-semibold mb-2" for="srcInput"><i class="bi bi-input-cursor-text me-1"></i>输入文本</label>
+          <textarea class="form-control font-monospace" id="srcInput" rows="6" placeholder="粘贴需要转换的文本…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模式与操作 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <div class="d-flex flex-wrap gap-3 align-items-center mb-3">
+            <span class="text-secondary small">转换类型：</span>
+            <div class="btn-group flex-wrap" role="group" id="modeGroup">
+              <input type="radio" class="btn-check" name="mode" id="mUrl" value="url" checked>
+              <label class="btn btn-outline-secondary" for="mUrl">URL</label>
+              <input type="radio" class="btn-check" name="mode" id="mB64" value="base64">
+              <label class="btn btn-outline-secondary" for="mB64">Base64</label>
+              <input type="radio" class="btn-check" name="mode" id="mUni" value="unicode">
+              <label class="btn btn-outline-secondary" for="mUni">Unicode \uXXXX</label>
+              <input type="radio" class="btn-check" name="mode" id="mHex" value="hex">
+              <label class="btn btn-outline-secondary" for="mHex">十六进制</label>
+              <input type="radio" class="btn-check" name="mode" id="mHtml" value="html">
+              <label class="btn btn-outline-secondary" for="mHtml">HTML 实体</label>
+              <input type="radio" class="btn-check" name="mode" id="mAscii" value="ascii">
+              <label class="btn btn-outline-secondary" for="mAscii">ASCII</label>
+              <input type="radio" class="btn-check" name="mode" id="mCs" value="charset">
+              <label class="btn btn-outline-secondary" for="mCs">字符集（乱码修复）</label>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-3 align-items-center">
+            <!-- 编码方向（前五种模式） -->
+            <div class="btn-group" role="group" id="dirGroup">
+              <input type="radio" class="btn-check" name="dir" id="dEnc" value="encode" checked>
+              <label class="btn btn-outline-secondary" for="dEnc">编码</label>
+              <input type="radio" class="btn-check" name="dir" id="dDec" value="decode">
+              <label class="btn btn-outline-secondary" for="dDec">解码</label>
+            </div>
+            <!-- 字符集选择（仅字符集模式） -->
+            <div class="d-none d-flex flex-wrap gap-2 align-items-center" id="charsetRow">
+              <span class="text-secondary small">源编码</span>
+              <select class="form-select form-select-sm w-auto" id="srcCharset"></select>
+              <button class="btn btn-sm btn-outline-secondary" id="swapCharset" title="交换" type="button"><i class="bi bi-arrow-left-right"></i></button>
+              <span class="text-secondary small">目标编码</span>
+              <select class="form-select form-select-sm w-auto" id="dstCharset"></select>
+            </div>
+
+            <button class="btn btn-primary px-4" id="convertBtn" type="button">
+              <i class="bi bi-arrow-repeat me-1"></i>转换
+            </button>
+            <button class="btn btn-outline-secondary" id="swapBtn" type="button" title="把结果放回输入框">
+              <i class="bi bi-arrow-down-up me-1"></i>结果→输入
+            </button>
+            <button class="btn btn-outline-secondary" id="clearBtn" type="button">
+              <i class="bi bi-eraser me-1"></i>清空
+            </button>
+          </div>
+
+          <div class="d-none alert alert-warning small mt-3 mb-0 py-2" id="errMsg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 输出 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <label class="form-label fw-semibold mb-0" for="dstOutput"><i class="bi bi-box-arrow-down-right me-1"></i>转换结果</label>
+            <button class="btn btn-sm btn-outline-primary" id="copyBtn" type="button">
+              <i class="bi bi-clipboard me-1"></i>复制
+            </button>
+          </div>
+          <textarea class="form-control font-monospace" id="dstOutput" rows="6" readonly placeholder="结果将显示在这里…"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 说明 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body small text-secondary">
+          <h6 class="fw-semibold text-body mb-2">乱码修复速查</h6>
+          <div>「娴嬭瘯」类乱码 → 源编码 <b>GBK</b>、目标编码 <b>UTF-8</b>（UTF-8 文本被误当 GBK 显示）</div>
+          <div>「æµ‹è¯•」类乱码 → 源编码 <b>Latin-1</b>、目标编码 <b>UTF-8</b>（UTF-8 文本被误当 Latin-1 显示）</div>
+          <div>「锟斤拷」是 UTF-8 替换符（U+FFFD）被 GBK 解读的结果，源字节已丢失，无法还原</div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var CHARSETS = {{ charset_options | safe }};
+      var input = document.getElementById('srcInput');
+      var output = document.getElementById('dstOutput');
+      var errMsg = document.getElementById('errMsg');
+      var charsetRow = document.getElementById('charsetRow');
+      var dirGroup = document.getElementById('dirGroup');
+
+      // 填充字符集下拉框
+      var srcSel = document.getElementById('srcCharset');
+      var dstSel = document.getElementById('dstCharset');
+      Object.keys(CHARSETS).forEach(function (code) {
+        srcSel.add(new Option(CHARSETS[code], code));
+        dstSel.add(new Option(CHARSETS[code], code));
+      });
+      srcSel.value = 'gbk';
+      dstSel.value = 'utf-8';
+
+      function mode() {
+        return document.querySelector('input[name="mode"]:checked').value;
+      }
+      function direction() {
+        return document.querySelector('input[name="dir"]:checked').value;
+      }
+      function showError(msg) {
+        errMsg.textContent = msg;
+        errMsg.classList.remove('d-none');
+      }
+      function hideError() {
+        errMsg.classList.add('d-none');
+      }
+      document.getElementById('modeGroup').addEventListener('change', function () {
+        var isCharset = mode() === 'charset';
+        charsetRow.classList.toggle('d-none', !isCharset);
+        dirGroup.classList.toggle('d-none', isCharset);
+        hideError();
+      });
+
+      // 字节工具
+      function toBytes(str) { return new TextEncoder().encode(str); }
+      function fromBytes(bytes) { return new TextDecoder().decode(bytes); }
+      function bytesToHex(bytes, sep) {
+        return Array.from(bytes, function (b) {
+          return b.toString(16).padStart(2, '0');
+        }).join(sep).toUpperCase();
+      }
+
+      // 纯前端转换（浏览器无法编码 GBK 等旧编码，字符集模式走后端）
+      var converters = {
+        url: {
+          encode: function (t) { return encodeURIComponent(t); },
+          decode: function (t) { return decodeURIComponent(t.replace(/\+/g, ' ')); }
+        },
+        base64: {
+          encode: function (t) {
+            var bin = Array.from(toBytes(t), function (b) { return String.fromCharCode(b); }).join('');
+            return btoa(bin);
+          },
+          decode: function (t) {
+            return fromBytes(Uint8Array.from(atob(t.replace(/\s+/g, '')), function (c) { return c.charCodeAt(0); }));
+          }
+        },
+        unicode: {
+          encode: function (t) {
+            return Array.from(t, function (c) {
+              return '\\u' + c.codePointAt(0).toString(16).padStart(4, '0');
+            }).join('');
+          },
+          decode: function (t) {
+            return t.replace(/\\u([0-9a-fA-F]{4})/g, function (_, h) {
+              return String.fromCharCode(parseInt(h, 16));
+            });
+          }
+        },
+        hex: {
+          encode: function (t) { return bytesToHex(toBytes(t), ' '); },
+          decode: function (t) {
+            var clean = t.replace(/0[xX]/g, '').replace(/[\s,\\x\\X]/g, '');
+            if (!/^[0-9a-fA-F]*$/.test(clean) || clean.length % 2) {
+              throw new Error('不是有效的十六进制内容');
+            }
+            var bytes = new Uint8Array(clean.length / 2);
+            for (var i = 0; i < bytes.length; i++) {
+              bytes[i] = parseInt(clean.substr(i * 2, 2), 16);
+            }
+            return fromBytes(bytes);
+          }
+        },
+        html: {
+          encode: function (t) {
+            var div = document.createElement('div');
+            div.textContent = t;
+            return div.innerHTML;
+          },
+          decode: function (t) {
+            var ta = document.createElement('textarea');
+            ta.innerHTML = t;
+            return ta.value;
+          }
+        },
+        ascii: {
+          encode: function (t) {
+            // 每个字符转为十进制码点，空格分隔（ASCII 字符即其 ASCII 码）
+            return Array.from(t, function (c) { return c.codePointAt(0); }).join(' ');
+          },
+          decode: function (t) {
+            var parts = t.trim().split(/[\s,]+/).filter(Boolean);
+            if (!parts.length || parts.some(function (p) {
+              return !/^\d+$/.test(p) || +p < 0 || +p > 0x10FFFF;
+            })) {
+              throw new Error('请输入以空格分隔的十进制数值（0 ~ 1114111）');
+            }
+            return parts.map(function (p) { return String.fromCodePoint(+p); }).join('');
+          }
+        }
+      };
+
+      function convert() {
+        hideError();
+        var t = input.value;
+        if (!t) { output.value = ''; return; }
+        var m = mode();
+        if (m === 'charset') {
+          fetch('{% url 'tools:encode_charset' %}', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'text=' + encodeURIComponent(t) + '&src=' + srcSel.value + '&dst=' + dstSel.value
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (!data.ok) { showError(data.error || '转换失败'); return; }
+              output.value = data.result;
+            })
+            .catch(function () { showError('请求失败，请重试'); });
+          return;
+        }
+        try {
+          output.value = converters[m][direction()](t);
+        } catch (e) {
+          output.value = '';
+          showError(e.message === t.replace ? '解码失败：内容不是有效的 ' + m.toUpperCase() + ' 数据' : (e.message || '转换失败'));
+        }
+      }
+
+      document.getElementById('convertBtn').addEventListener('click', convert);
+      input.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { convert(); }
+      });
+
+      document.getElementById('clearBtn').addEventListener('click', function () {
+        input.value = ''; output.value = ''; hideError();
+      });
+      document.getElementById('swapBtn').addEventListener('click', function () {
+        if (output.value) { input.value = output.value; output.value = ''; hideError(); }
+      });
+      document.getElementById('swapCharset').addEventListener('click', function () {
+        var s = srcSel.value; srcSel.value = dstSel.value; dstSel.value = s;
+      });
+      document.getElementById('copyBtn').addEventListener('click', function () {
+        if (!output.value) { return; }
+        function ok() {
+          var btn = document.getElementById('copyBtn');
+          btn.innerHTML = '<i class="bi bi-check2 me-1"></i>已复制';
+          setTimeout(function () { btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>复制'; }, 1500);
+        }
+        navigator.clipboard.writeText(output.value).then(ok).catch(function () {
+          // clipboard API 不可用时的兜底
+          var ta = document.createElement('textarea');
+          ta.value = output.value;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          ok();
+        });
+      });
+    })();
+  </script>
+{% endblock %}
