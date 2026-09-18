@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}github地址转换{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <h1 class="page-title">GitHub 下载地址转换</h1>
+    <p class="page-subtitle">粘贴任意 GitHub 链接，一键生成 git clone / raw / 源码包 / release 资产的原始与加速地址（参考 gh-proxy.com）</p>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <label class="form-label fw-semibold mb-2" for="ghInput"><i class="bi bi-link-45deg me-1"></i>GitHub 地址</label>
+          <div class="d-flex flex-wrap gap-2">
+            <input type="text" class="form-control font-monospace" id="ghInput" style="flex:1;min-width:260px"
+                   placeholder="https://github.com/user/repo 或 blob/raw/archive/releases 链接、git@github.com:user/repo.git">
+            <button class="btn btn-primary px-4" id="parseBtn" type="button"><i class="bi bi-arrow-repeat me-1"></i>转换</button>
+          </div>
+          <div class="d-none alert alert-warning small py-2 mt-3 mb-0" id="ghErr"></div>
+
+          <!-- 镜像选择 -->
+          <div class="mt-3 d-flex flex-wrap gap-2 align-items-center" id="mirrorRow">
+            <span class="text-secondary small">加速前缀：</span>
+            <div class="btn-group flex-wrap" id="mirrorGroup" role="group"></div>
+            <input type="text" class="form-control form-control-sm font-monospace" id="mirrorCustom" placeholder="自定义前缀，如 https://xx.com/" style="width:230px">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 结果 -->
+    <div class="col-12 d-none" id="resultWrap">
+      <div class="card stat-card mb-4">
+        <div class="card-body d-flex flex-wrap gap-3 align-items-center">
+          <h6 class="fw-semibold mb-0"><i class="bi bi-diagram-3 me-1"></i>解析结果：</h6>
+          <span class="badge text-bg-dark" id="rOwner">—</span>
+          <span class="fw-semibold">/</span>
+          <span class="badge text-bg-dark" id="rRepo">—</span>
+          <span class="d-flex align-items-center gap-1 ms-2">
+            <span class="text-secondary small">分支</span>
+            <input type="text" class="form-control form-control-sm font-monospace" id="rBranch" style="width:120px" value="main">
+          </span>
+        </div>
+      </div>
+      <div class="d-flex flex-column gap-4" id="cardsWrap"></div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var MIRRORS = ['https://gh-proxy.com/', 'https://v4.gh-proxy.org/', 'https://axisnow.gh-proxy.org/', 'https://ghfast.top/', 'https://ghproxy.net/', 'https://gh.llkk.cc/'];
+      var state = null;   // {owner, repo, branch, path, tag, file, kind}
+      var mirror = '';
+
+      var group = document.getElementById('mirrorGroup');
+      MIRRORS.forEach(function (m, i) {
+        var id = 'mir' + i;
+        var input = document.createElement('input');
+        input.type = 'radio'; input.className = 'btn-check'; input.name = 'mirror';
+        input.id = id; input.value = m;
+        var label = document.createElement('label');
+        label.className = 'btn btn-outline-secondary btn-sm'; label.htmlFor = id;
+        label.textContent = m.replace('https://', '').replace(/\/$/, '');
+        group.appendChild(input); group.appendChild(label);
+      });
+      group.addEventListener('change', function () {
+        mirror = group.querySelector('input:checked').value;
+        document.getElementById('mirrorCustom').value = '';
+        render();
+      });
+      document.getElementById('mirrorCustom').addEventListener('input', function () {
+        if (this.value.trim()) {
+          mirror = this.value.trim();
+          if (!/\/$/.test(mirror)) { mirror += '/'; }
+          group.querySelectorAll('input').forEach(function (i) { i.checked = false; });
+          render();
+        }
+      });
+
+      function copyText(text, cb) {
+        navigator.clipboard.writeText(text).then(cb || function () {}).catch(function () {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy'); document.body.removeChild(ta);
+          if (cb) { cb(); }
+        });
+      }
+
+      // 行：标签 + 内容 + 复制 + 打开
+      function row(label, value, isUrl) {
+        var open = isUrl
+          ? '<a class="btn btn-sm btn-outline-primary" href="' + value + '" target="_blank" rel="noopener" title="打开"><i class="bi bi-box-arrow-up-right"></i></a>'
+          : '';
+        return '<div class="d-flex align-items-center gap-2 py-1">' +
+          '<span class="text-secondary small" style="width:92px;flex-shrink:0">' + label + '</span>' +
+          '<code class="small text-truncate flex-grow-1" style="min-width:0">' + value + '</code>' +
+          '<button class="btn btn-sm btn-outline-secondary btn-copy flex-shrink-0" data-v="' + value.replace(/"/g, '&quot;') + '" title="复制"><i class="bi bi-clipboard"></i></button>' +
+          open + '</div>';
+      }
+
+      function card(title, icon, rowsHtml, hint) {
+        if (!rowsHtml) { return ''; }
+        return '<div class="card stat-card mb-0"><div class="card-body">' +
+          '<h6 class="fw-semibold mb-2"><i class="bi ' + icon + ' me-1"></i>' + title + '</h6>' +
+          rowsHtml + (hint ? '<div class="text-secondary small mt-2">' + hint + '</div>' : '') + '</div></div>';
+      }
+
+      function render() {
+        if (!state) { return; }
+        var o = state.owner, r = state.repo, b = document.getElementById('rBranch').value.trim() || 'main';
+        var https = 'https://github.com/' + o + '/' + r;
+        var rawBase = 'https://raw.githubusercontent.com/' + o + '/' + r + '/' + b;
+        var hasPath = !!state.path;
+        var html = '';
+
+        // 1. git clone
+        var cloneRows =
+          row('原始', 'git clone ' + https + '.git') +
+          (mirror ? row('加速', 'git clone ' + mirror + https + '.git') : '') +
+          row('SSH', 'git clone git@github.com:' + o + '/' + r + '.git');
+        html += card('Git Clone（支持代理加速）', 'bi-terminal', cloneRows, '加速地址 = 前缀 + 原地址，HTTP 方式可用；SSH 无法代理。');
+
+        // 2. raw
+        if (hasPath) {
+          var rawUrl = rawBase + '/' + state.path;
+          var rawRows = row('原始', rawUrl, true) +
+            (mirror ? row('加速', mirror + rawUrl, true) : '');
+          html += card('Raw 原始文件（' + state.path.split('/').pop() + '）', 'bi-file-earmark-code', rawRows);
+        } else {
+          var pat = rawBase + '/' + (state.kind === 'raw-noPath' ? '文件路径' : '文件路径');
+          html += card('Raw 原始文件', 'bi-file-earmark-code',
+            row('格式', pat), '粘贴具体文件的 blob/raw 链接可生成完整地址。');
+        }
+
+        // 3. 源码 zip
+        var zip = https + '/archive/refs/heads/' + b + '.zip';
+        var tgz = https + '/archive/refs/heads/' + b + '.tar.gz';
+        var zipRows = row('zip 原始', zip, true) +
+          (mirror ? row('zip 加速', mirror + zip, true) : '') +
+          row('tar.gz 原始', tgz, true) +
+          (mirror ? row('tar.gz 加速', mirror + tgz, true) : '');
+        html += card('分支源码压缩包（' + b + '）', 'bi-file-earmark-zip', zipRows, '分支名可在上方修改，链接实时更新。');
+
+        // 4. release
+        if (state.tag && state.file) {
+          var asset = https + '/releases/download/' + state.tag + '/' + state.file;
+          var assetRows = row('资产原始', asset, true) +
+            (mirror ? row('资产加速', mirror + asset, true) : '');
+          html += card('Release 资产（' + state.tag + '）', 'bi-package', assetRows);
+        }
+        var relRows = row('Releases 页', https + '/releases', true) +
+          row('最新版页', https + '/releases/latest', true) +
+          (mirror ? row('最新版加速', mirror + https + '/releases/latest', true) : '');
+        html += card('Release 发行版', 'bi-box-seam', relRows,
+          '下载某版本资产：打开 latest 页复制资产链接后再转换，或直接在链接中带上 /releases/download/。');
+
+        document.getElementById('cardsWrap').innerHTML = html;
+        document.querySelectorAll('.btn-copy').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            copyText(btn.getAttribute('data-v'), function () {
+              var icon = btn.querySelector('i');
+              icon.className = 'bi bi-check2';
+              setTimeout(function () { icon.className = 'bi bi-clipboard'; }, 1200);
+            });
+          });
+        });
+      }
+
+      function showErr(msg) {
+        var el = document.getElementById('ghErr');
+        if (msg) { el.textContent = msg; el.classList.remove('d-none'); }
+        else { el.classList.add('d-none'); }
+      }
+
+      function parse(input) {
+        input = (input || '').trim();
+        if (!input) { return null; }
+        var m = input.match(/^git@github\.com:([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/);
+        if (m) { return { owner: m[1], repo: m[2], kind: 'repo' }; }
+        var u;
+        try { u = new URL(input); } catch (e) { return null; }
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') { return null; }
+        var host = u.hostname.toLowerCase();
+        var parts = u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+        if (parts.length < 2) { return null; }
+        var owner = parts[0], repo = parts[1].replace(/\.git$/, '');
+        var base = { owner: owner, repo: repo };
+
+        if (host === 'raw.githubusercontent.com' && parts.length >= 4) {
+          return Object.assign(base, { kind: 'raw', branch: parts[2], path: parts.slice(3).join('/') });
+        }
+        if (host === 'codeload.github.com' && parts.length >= 4) {
+          // codeload.github.com/o/r/zip/refs/heads/branch
+          var b2 = parts[4] ? parts.slice(4).join('/') : parts[3];
+          return Object.assign(base, { kind: 'archive', branch: b2 });
+        }
+        if (host !== 'github.com' && host !== 'www.github.com') { return null; }
+        if (parts.length === 2) { return Object.assign(base, { kind: 'repo' }); }
+        var seg = parts[2];
+        if (seg === 'tree' && parts.length >= 4) {
+          return Object.assign(base, { kind: 'tree', branch: parts[3], path: parts.length > 4 ? parts.slice(4).join('/') : '' });
+        }
+        if (seg === 'blob' && parts.length >= 5) {
+          return Object.assign(base, { kind: 'blob', branch: parts[3], path: parts.slice(4).join('/') });
+        }
+        if (seg === 'raw' && parts.length >= 5) {
+          return Object.assign(base, { kind: 'blob', branch: parts[3], path: parts.slice(4).join('/') });
+        }
+        if (seg === 'archive' && parts.length >= 4) {
+          // archive/refs/heads/main.zip
+          var b3 = parts[3] === 'refs' && parts.length >= 5 ? parts.slice(5).join('/').replace(/\.(zip|tar\.gz|tgz)$/, '') : parts[3].replace(/\.(zip|tar\.gz|tgz)$/, '');
+          return Object.assign(base, { kind: 'archive', branch: b3 });
+        }
+        if (seg === 'releases') {
+          if (parts[3] === 'download' && parts.length >= 6) {
+            return Object.assign(base, { kind: 'asset', tag: parts[4], file: parts.slice(5).join('/') });
+          }
+          if (parts[3] === 'tag' && parts[4]) {
+            return Object.assign(base, { kind: 'releases', tag: parts[4] });
+          }
+          return Object.assign(base, { kind: 'releases' });
+        }
+        // issues/pull/wiki 等页面按仓库处理
+        return Object.assign(base, { kind: 'repo' });
+      }
+
+      function convert() {
+        showErr('');
+        var res = parse(document.getElementById('ghInput').value);
+        if (!res) {
+          showErr('无法识别该链接。支持：github.com 仓库/文件页、raw.githubusercontent.com、codeload.github.com、releases/download 资产链接、git@github.com: SSH 地址');
+          document.getElementById('resultWrap').classList.add('d-none');
+          state = null;
+          return;
+        }
+        state = res;
+        document.getElementById('rOwner').textContent = res.owner;
+        document.getElementById('rRepo').textContent = res.repo;
+        document.getElementById('rBranch').value = res.branch || 'main';
+        document.getElementById('resultWrap').classList.remove('d-none');
+        render();
+      }
+
+      document.getElementById('parseBtn').addEventListener('click', convert);
+      document.getElementById('ghInput').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { convert(); }
+      });
+      document.getElementById('rBranch').addEventListener('input', function () {
+        if (state) { state.branch = this.value; render(); }
+      });
+      // 默认演示：预填示例并自动转换
+      document.getElementById('ghInput').value = 'https://github.com/ahrm/sioyek/releases/download/v2.0.0/sioyek-release-windows.zip';
+      convert();
+    })();
+  </script>
+{% endblock %}

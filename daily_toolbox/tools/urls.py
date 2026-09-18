@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.index, name="index"),
     path("icons/", views.icon_list, name="icon_list"),
     path("github/", views.github_page, name="github"),
+    path("github-convert/", views.gh_convert_page, name="gh_convert_page"),
     path("api/github/ips/", views.github_ips, name="github_ips"),
     path("api/github/hosts/", views.github_hosts, name="github_hosts"),
     path("api/github/hosts/clear/", views.github_hosts_clear, name="github_hosts_clear"),
