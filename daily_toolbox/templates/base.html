@@ -51,7 +51,8 @@
       <a class="nav-link {% if request.resolver_match.url_name == 'icon_list' %}active{% endif %}"
          href="{% url 'tools:icon_list' %}"><i class="bi bi-list"></i> 图标列表</a>
       <a class="nav-link" href="#"><i class="bi bi-images"></i> 图片压缩</a>
-      <a class="nav-link" href="#"><i class="bi bi-arrow-left-right"></i> 格式转换</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'image_convert_page' %}active{% endif %}"
+         href="{% url 'tools:image_convert_page' %}"><i class="bi bi-arrow-left-right"></i> 格式转换</a>
       <a class="nav-link" href="#"><i class="bi bi-file-earmark-image"></i> 图片转 Base64</a>
 
       <p class="nav-section">日常办公</p>
