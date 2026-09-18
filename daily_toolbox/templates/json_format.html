@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}JSON 格式化{% endblock %}
+
+{% block content %}
+  <style>
+    .json-view { border-radius: .5rem; background: #282c34; color: #abb2bf; padding: 1rem;
+                 font-family: Consolas, 'Courier New', monospace; font-size: .875rem;
+                 line-height: 1.55; min-height: 420px; max-height: 70vh; overflow: auto; }
+    .j-key { color: #e06c75; } .j-str { color: #98c379; } .j-num { color: #d19a66; }
+    .j-bool { color: #56b6c2; } .j-null { color: #56b6c2; }
+    #srcText { font-family: Consolas, 'Courier New', monospace; font-size: .875rem; min-height: 420px; }
+  </style>
+
+  <div class="mb-4">
+    <h1 class="page-title">JSON 格式化</h1>
+    <p class="page-subtitle">格式化 / 压缩 / 语法高亮 / 错误定位，纯本地处理不上传</p>
+  </div>
+
+  <div class="card stat-card mb-3">
+    <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+      <label class="small fw-semibold text-secondary">缩进</label>
+      <select class="form-select form-select-sm w-auto" id="indentSel">
+        <option value="2" selected>2 空格</option>
+        <option value="4">4 空格</option>
+        <option value="\t">Tab</option>
+      </select>
+      <button class="btn btn-primary btn-sm px-3" id="fmtBtn"><i class="bi bi-magic me-1"></i>格式化</button>
+      <button class="btn btn-outline-primary btn-sm" id="minBtn"><i class="bi bi-arrows-collapse me-1"></i>压缩</button>
+      <button class="btn btn-outline-secondary btn-sm" id="checkBtn"><i class="bi bi-check2-circle me-1"></i>校验</button>
+      <div class="vr d-none d-md-block"></div>
+      <button class="btn btn-outline-secondary btn-sm" id="copyBtn"><i class="bi bi-clipboard me-1"></i>复制结果</button>
+      <button class="btn btn-outline-secondary btn-sm" id="dlBtn"><i class="bi bi-download me-1"></i>下载 .json</button>
+      <button class="btn btn-outline-secondary btn-sm" id="sampleBtn"><i class="bi bi-lightbulb me-1"></i>示例</button>
+      <button class="btn btn-outline-danger btn-sm ms-auto" id="clearBtn"><i class="bi bi-trash me-1"></i>清空</button>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <textarea class="form-control" id="srcText" placeholder='在此粘贴 JSON，例如 {"name":"工具箱","version":1}' spellcheck="false"></textarea>
+    </div>
+    <div class="col-lg-6">
+      <pre class="json-view" id="outView"><span class="text-secondary">// 格式化结果将显示在这里</span></pre>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-md-8">
+      <div id="alertBox" class="alert d-none py-2 mb-0"></div>
+    </div>
+    <div class="col-md-4">
+      <div class="text-secondary small text-md-end" id="statLine"></div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var src = document.getElementById('srcText');
+      var out = document.getElementById('outView');
+      var alertBox = document.getElementById('alertBox');
+      var statLine = document.getElementById('statLine');
+      var lastResult = '';
+
+      function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+      function fmtBytes(n) {
+        if (!n) { return '0 B'; }
+        var u = ['B', 'KB', 'MB'], i = 0;
+        while (n >= 1024 && i < 2) { n /= 1024; i++; }
+        return n.toFixed(i ? 1 : 0) + ' ' + u[i];
+      }
+      function indent() {
+        var v = document.getElementById('indentSel').value;
+        return v === '\\t' ? '\\t' : +v;
+      }
+
+      // 语法高亮：先转义 HTML 再按 token 上色
+      function highlight(json) {
+        return esc(json).replace(
+          /("(?:\\u[0-9a-fA-F]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+          function (m) {
+            var cls = 'j-num';
+            if (m.charAt(0) === '"') { cls = /:$/.test(m) ? 'j-key' : 'j-str'; }
+            else if (m === 'true' || m === 'false') { cls = 'j-bool'; }
+            else if (m === 'null') { cls = 'j-null'; }
+            return '<span class="' + cls + '">' + m + '</span>';
+          });
+      }
+
+      function depth(v) {
+        if (v === null || typeof v !== 'object') { return 0; }
+        var vals = Array.isArray(v) ? v : Object.keys(v).map(function (k) { return v[k]; });
+        return 1 + vals.reduce(function (m, x) { return Math.max(m, depth(x)); }, 0);
+      }
+      function countKeys(v) {
+        if (v === null || typeof v !== 'object') { return 0; }
+        var n = Array.isArray(v) ? 0 : Object.keys(v).length;
+        (Array.isArray(v) ? v : Object.keys(v).map(function (k) { return v[k]; }))
+          .forEach(function (x) { n += countKeys(x); });
+        return n;
+      }
+
+      // 从 SyntaxError 中解析出错位置（V8: "... at position N"）
+      function errorInfo(text, exc) {
+        var m = /position\s+(\d+)/i.exec(exc.message);
+        if (!m) { return exc.message; }
+        var pos = Math.min(+m[1], text.length);
+        var before = text.slice(0, pos);
+        var line = before.split('\n').length;
+        var col = pos - before.lastIndexOf('\n');
+        return exc.message + '（第 ' + line + ' 行，第 ' + col + ' 列附近）';
+      }
+
+      function show(kind, msg) {
+        alertBox.className = 'alert py-2 mb-0 alert-' + kind;
+        alertBox.innerHTML = msg;
+        alertBox.classList.remove('d-none');
+      }
+      function hideAlert() { alertBox.classList.add('d-none'); }
+
+      function render(jsonText) {
+        lastResult = jsonText;
+        out.innerHTML = highlight(jsonText);
+        statLine.textContent = '输入 ' + fmtBytes(new Blob([src.value]).size) +
+          ' · 输出 ' + fmtBytes(new Blob([jsonText]).size) +
+          ' · ' + jsonText.split('\n').length + ' 行';
+      }
+
+      function run(mode) {   // mode: fmt / min / check
+        var text = src.value.trim();
+        if (!text) { show('warning', '请先输入 JSON 内容'); return; }
+        try {
+          var obj = JSON.parse(text);
+          hideAlert();
+          if (mode === 'check') {
+            show('success', 'JSON 合法 ✓ · 顶层类型 ' +
+              (Array.isArray(obj) ? 'Array' : obj === null ? 'null' : typeof obj) +
+              ' · 最大深度 ' + depth(obj) + ' · 键总数 ' + countKeys(obj));
+            return;
+          }
+          render(mode === 'min' ? JSON.stringify(obj) : JSON.stringify(obj, null, indent()));
+        } catch (exc) {
+          lastResult = '';
+          out.innerHTML = '<span class="text-secondary">// 解析失败</span>';
+          statLine.textContent = '';
+          show('danger', '<i class="bi bi-x-circle me-1"></i>' + errorInfo(text, exc));
+        }
+      }
+
+      document.getElementById('fmtBtn').addEventListener('click', function () { run('fmt'); });
+      document.getElementById('minBtn').addEventListener('click', function () { run('min'); });
+      document.getElementById('checkBtn').addEventListener('click', function () { run('check'); });
+      document.getElementById('clearBtn').addEventListener('click', function () {
+        src.value = ''; lastResult = '';
+        out.innerHTML = '<span class="text-secondary">// 格式化结果将显示在这里</span>';
+        statLine.textContent = ''; hideAlert();
+      });
+      document.getElementById('copyBtn').addEventListener('click', function () {
+        if (!lastResult) { show('warning', '暂无结果可复制'); return; }
+        (navigator.clipboard ? navigator.clipboard.writeText(lastResult) : Promise.reject())
+          .catch(function () {
+            var t = document.createElement('textarea');
+            t.value = lastResult; document.body.appendChild(t); t.select();
+            document.execCommand('copy'); t.remove();
+          }).finally(function () {
+            show('success', '已复制到剪贴板');
+          });
+      });
+      document.getElementById('dlBtn').addEventListener('click', function () {
+        if (!lastResult) { show('warning', '暂无结果可下载'); return; }
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([lastResult], { type: 'application/json' }));
+        a.download = 'formatted.json'; a.click();
+      });
+      document.getElementById('sampleBtn').addEventListener('click', function () {
+        src.value = JSON.stringify({
+          name: 'Daily Toolbox', version: 2, tags: ['django', 'bootstrap'],
+          active: true, owner: null,
+          tools: [{ id: 1, name: 'JSON 格式化', stars: 5 }, { id: 2, name: '下载器', stars: 4.5 }],
+          config: { theme: 'majestic', maxThreads: 10, proxy: { enabled: false, url: null } }
+        });
+      });
+      src.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { run('fmt'); }
+      });
+    })();
+  </script>
+{% endblock %}

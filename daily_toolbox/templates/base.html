@@ -34,7 +34,8 @@
          href="{% url 'tools:downloader_page' %}"><i class="bi bi-download"></i> 下载器</a>
 
       <p class="nav-section">文本处理</p>
-      <a class="nav-link" href="#"><i class="bi bi-braces"></i> JSON 格式化</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'json_page' %}active{% endif %}"
+         href="{% url 'tools:json_page' %}"><i class="bi bi-braces"></i> JSON 格式化</a>
       <a class="nav-link" href="#"><i class="bi bi-file-earmark-diff"></i> 文本对比</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'encode_page' %}active{% endif %}"
          href="{% url 'tools:encode_page' %}"><i class="bi bi-translate"></i> 编码转换</a>

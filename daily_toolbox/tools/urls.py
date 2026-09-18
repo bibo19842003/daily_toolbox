@@ -10,6 +10,7 @@ urlpatterns = [
     path("github/", views.github_page, name="github"),
     path("github-convert/", views.gh_convert_page, name="gh_convert_page"),
     path("convert/", views.image_convert_page, name="image_convert_page"),
+    path("json/", views.json_page, name="json_page"),
     path("api/github/ips/", views.github_ips, name="github_ips"),
     path("api/github/hosts/", views.github_hosts, name="github_hosts"),
     path("api/github/hosts/clear/", views.github_hosts_clear, name="github_hosts_clear"),

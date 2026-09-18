@@ -177,6 +177,10 @@ def image_convert_page(request):
     return render(request, "convert.html")
 
 
+def json_page(request):
+    return render(request, "json_format.html")
+
+
 def github_page(request):
     try:
         current = [line for line in _read_hosts_text().splitlines() if _is_github_com_mapping(line)]
