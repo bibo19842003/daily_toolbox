@@ -47,12 +47,12 @@
             <div class="col-auto d-none" id="icoSizesWrap">
               <label class="form-label small fw-semibold mb-1">ICO 包含尺寸</label>
               <div class="d-flex gap-2" id="icoSizes">
-                <div class="form-check"><input class="form-check-input" type="checkbox" value="16" id="ico16"><label class="form-check-label small" for="ico16">16</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" value="32" id="ico32" checked><label class="form-check-label small" for="ico32">32</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" value="48" id="ico48"><label class="form-check-label small" for="ico48">48</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" value="64" id="ico64"><label class="form-check-label small" for="ico64">64</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" value="128" id="ico128"><label class="form-check-label small" for="ico128">128</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" value="256" id="ico256" checked><label class="form-check-label small" for="ico256">256</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="icoSize" value="16" id="ico16"><label class="form-check-label small" for="ico16">16</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="icoSize" value="32" id="ico32"><label class="form-check-label small" for="ico32">32</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="icoSize" value="48" id="ico48"><label class="form-check-label small" for="ico48">48</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="icoSize" value="64" id="ico64"><label class="form-check-label small" for="ico64">64</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="icoSize" value="128" id="ico128"><label class="form-check-label small" for="ico128">128</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="icoSize" value="256" id="ico256" checked><label class="form-check-label small" for="ico256">256</label></div>
               </div>
             </div>
             <div class="col-auto ms-auto">
@@ -192,33 +192,24 @@
         return new Blob([u8], { type: 'image/bmp' });
       }
 
-      // ICO = 多尺寸 PNG 条目容器
+      // ICO = 单尺寸 PNG 条目容器
       function buildIco(img) {
-        var sizes = Array.prototype.map.call(
-          document.querySelectorAll('#icoSizes input:checked'), function (i) { return +i.value; });
-        if (!sizes.length) { sizes = [32, 256]; }
-        sizes.sort(function (a, b) { return a - b; });
-        return Promise.all(sizes.map(function (s) {
-          return canvasBlob(drawTo(img, s), 'image/png').then(function (b) { return b.arrayBuffer(); });
-        })).then(function (bufs) {
-          var count = bufs.length, head = 6, off = head + 16 * count;
-          var total = off + bufs.reduce(function (s, b) { return s + b.byteLength; }, 0);
-          var out = new Uint8Array(total);
+        var checked = document.querySelector('#icoSizes input:checked');
+        var px = checked ? +checked.value : 256;
+        return canvasBlob(drawTo(img, px), 'image/png').then(function (b) {
+          return b.arrayBuffer();
+        }).then(function (buf) {
+          var off = 6 + 16;
+          var out = new Uint8Array(off + buf.byteLength);
           var dv = new DataView(out.buffer);
-          dv.setUint16(0, 0, true); dv.setUint16(2, 1, true); dv.setUint16(4, count, true);
-          var cur = off;
-          bufs.forEach(function (b, i) {
-            var d = i * 16 + head, size = b.byteLength;
-            var px = sizes[i];
-            out[d] = px >= 256 ? 0 : px;      // 0 表示 256
-            out[d + 1] = px >= 256 ? 0 : px;
-            dv.setUint16(d + 4, 1, true);      // planes
-            dv.setUint16(d + 6, 32, true);     // bpp
-            dv.setUint32(d + 8, size, true);
-            dv.setUint32(d + 12, cur, true);
-            out.set(new Uint8Array(b), cur);
-            cur += size;
-          });
+          dv.setUint16(0, 0, true); dv.setUint16(2, 1, true); dv.setUint16(4, 1, true);
+          out[6] = px >= 256 ? 0 : px;       // 0 表示 256
+          out[7] = px >= 256 ? 0 : px;
+          dv.setUint16(10, 1, true);          // planes
+          dv.setUint16(12, 32, true);         // bpp
+          dv.setUint32(14, buf.byteLength, true);
+          dv.setUint32(18, off, true);
+          out.set(new Uint8Array(buf), off);
           return new Blob([out], { type: 'image/x-icon' });
         });
       }
