@@ -9,7 +9,7 @@
   <div class="mb-4">
     <h1 class="page-title">访问 GitHub</h1>
     <p class="page-subtitle">
-      两种方式绕过 DNS 污染加速 GitHub：解析真实 IP 测延迟后写入，或直接订阅社区维护的 hosts 源
+      三种方式绕过 DNS 污染加速 GitHub：解析真实 IP 测延迟后写入，或订阅社区维护的 hosts 源（ineo6 / GitHub520）
     </p>
   </div>
 
@@ -39,6 +39,12 @@
           <button class="nav-link" id="tabScheme2Btn" data-bs-toggle="pill" data-bs-target="#tabScheme2"
                   type="button" role="tab">
             <i class="bi bi-cloud-download me-1"></i>方案二 · 订阅 hosts 源
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tabScheme3Btn" data-bs-toggle="pill" data-bs-target="#tabScheme3"
+                  type="button" role="tab">
+            <i class="bi bi-cloud-check me-1"></i>方案三 · GitHub520 源
           </button>
         </li>
       </ul>
@@ -120,6 +126,26 @@
           <pre class="d-none small text-secondary bg-light rounded p-2 mb-0" id="remotePreview" style="max-height: 260px; overflow-y: auto;"></pre>
         </div>
 
+        <!-- ============ 方案三 ============ -->
+        <div class="tab-pane fade" id="tabScheme3" role="tabpanel">
+          <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+            <button class="btn btn-outline-primary" id="g520FetchBtn" data-url="{% url 'tools:github_remote' %}?source=github520">
+              <span class="spinner-border spinner-border-sm d-none" id="g520FetchSpin"></span>
+              <i class="bi bi-cloud-arrow-down me-1"></i>获取源内容
+            </button>
+            <button class="btn btn-primary" id="g520ApplyBtn" disabled data-url="{% url 'tools:github_remote_apply' %}?source=github520">
+              <span class="spinner-border spinner-border-sm d-none" id="g520ApplySpin"></span>
+              <i class="bi bi-save me-1"></i>合并写入 hosts
+            </button>
+            <span class="text-secondary small" id="g520Summary"></span>
+          </div>
+          <p class="text-secondary small mb-2">
+            订阅 <a href="https://github.com/521xueweihan/GitHub520" target="_blank" rel="noopener">521xueweihan/GitHub520</a>
+            项目维护的 hosts（经 jsDelivr CDN 分发，国内访问稳定，定期更新 GitHub 各域名 IP），一键合并写入。
+            与方案二写入同一段落标记，互相替换、不会累积。
+          </p>
+          <pre class="d-none small text-secondary bg-light rounded p-2 mb-0" id="g520Preview" style="max-height: 260px; overflow-y: auto;"></pre>
+        </div>
       </div>
     </div>
   </div>
@@ -339,6 +365,7 @@
       });
 
       // ==================== 方案二 ====================
+      // 方案二、方案三共用同一套逻辑（不同的 source 参数）
 
       var remoteFetchBtn = document.getElementById('remoteFetchBtn');
       var remoteFetchSpin = document.getElementById('remoteFetchSpin');
@@ -347,20 +374,27 @@
       var remoteSummary = document.getElementById('remoteSummary');
       var remotePreview = document.getElementById('remotePreview');
 
-      // 4. 获取远程 hosts 源
-      remoteFetchBtn.addEventListener('click', function () {
-        remoteFetchSpin.classList.remove('d-none');
-        remoteFetchBtn.disabled = true;
-        remoteApplyBtn.disabled = true;
-        remoteSummary.textContent = '';
-        fetch(remoteFetchBtn.dataset.url)
+      // 方案三（GitHub520 源）
+      var g520FetchBtn = document.getElementById('g520FetchBtn');
+      var g520FetchSpin = document.getElementById('g520FetchSpin');
+      var g520ApplyBtn = document.getElementById('g520ApplyBtn');
+      var g520ApplySpin = document.getElementById('g520ApplySpin');
+      var g520Summary = document.getElementById('g520Summary');
+      var g520Preview = document.getElementById('g520Preview');
+
+      function remoteFetch(fetchBtn, spin, summary, preview, applyBtn) {
+        spin.classList.remove('d-none');
+        fetchBtn.disabled = true;
+        applyBtn.disabled = true;
+        summary.textContent = '';
+        fetch(fetchBtn.dataset.url)
           .then(function (r) { return r.json(); })
           .then(function (data) {
             if (data.ok) {
-              remoteSummary.textContent = '共 ' + data.added + ' 条映射，覆盖 ' + data.domain_count + ' 个域名';
-              remotePreview.textContent = data.preview.join('\n');
-              remotePreview.classList.remove('d-none');
-              remoteApplyBtn.disabled = false;
+              summary.textContent = '共 ' + data.added + ' 条映射，覆盖 ' + data.domain_count + ' 个域名';
+              preview.textContent = data.preview.join('\n');
+              preview.classList.remove('d-none');
+              applyBtn.disabled = false;
             } else {
               showModal(false, '<p class="mb-0">' + escapeHtml(data.message || '获取失败') + '</p>');
             }
@@ -369,16 +403,15 @@
             showModal(false, '<p class="mb-0">获取远程 hosts 失败，请检查网络后重试。</p>');
           })
           .finally(function () {
-            remoteFetchSpin.classList.add('d-none');
-            remoteFetchBtn.disabled = false;
+            spin.classList.add('d-none');
+            fetchBtn.disabled = false;
           });
-      });
+      }
 
-      // 5. 合并写入 hosts
-      remoteApplyBtn.addEventListener('click', function () {
-        remoteApplySpin.classList.remove('d-none');
-        remoteApplyBtn.disabled = true;
-        fetch(remoteApplyBtn.dataset.url, {
+      function remoteApply(applyBtn, spin) {
+        spin.classList.remove('d-none');
+        applyBtn.disabled = true;
+        fetch(applyBtn.dataset.url, {
           method: 'POST',
           headers: { 'X-CSRFToken': getCookie('csrftoken') }
         })
@@ -406,9 +439,22 @@
             showModal(false, '<p class="mb-0">请求失败，请确认服务器正在运行。</p>');
           })
           .finally(function () {
-            remoteApplySpin.classList.add('d-none');
-            remoteApplyBtn.disabled = false;
+            spin.classList.add('d-none');
+            applyBtn.disabled = false;
           });
+      }
+
+      remoteFetchBtn.addEventListener('click', function () {
+        remoteFetch(remoteFetchBtn, remoteFetchSpin, remoteSummary, remotePreview, remoteApplyBtn);
+      });
+      remoteApplyBtn.addEventListener('click', function () {
+        remoteApply(remoteApplyBtn, remoteApplySpin);
+      });
+      g520FetchBtn.addEventListener('click', function () {
+        remoteFetch(g520FetchBtn, g520FetchSpin, g520Summary, g520Preview, g520ApplyBtn);
+      });
+      g520ApplyBtn.addEventListener('click', function () {
+        remoteApply(g520ApplyBtn, g520ApplySpin);
       });
     })();
   </script>

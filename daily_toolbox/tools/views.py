@@ -76,6 +76,8 @@ HOSTS_PATH = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "d
 
 # 方案二：社区维护的 GitHub 加速 hosts 订阅源（定期更新各域名最优 IP）
 REMOTE_HOSTS_URL = "https://gitlab.com/ineo6/hosts/-/raw/master/hosts?ref_type=heads&inline=false"
+GITHUB520_HOSTS_URL = "https://cdn.jsdelivr.net/gh/521xueweihan/GitHub520@main/hosts"
+REMOTE_SOURCES = {"ineo6": REMOTE_HOSTS_URL, "github520": GITHUB520_HOSTS_URL}
 
 
 def _doh_resolve(domain):
@@ -388,9 +390,10 @@ def _remove_old_remote_section(lines):
 
 @require_GET
 def github_remote(request):
-    """获取远程 hosts 源内容并解析，返回预览信息（不写入）。"""
+    """获取远程 hosts 源内容并解析，返回预览信息（不写入）。source=ineo6（默认）/ github520。"""
+    url = REMOTE_SOURCES.get(request.GET.get("source"), REMOTE_HOSTS_URL)
     try:
-        text = _fetch_remote_hosts(REMOTE_HOSTS_URL)
+        text = _fetch_remote_hosts(url)
     except Exception as exc:
         return JsonResponse({"ok": False, "message": f"获取远程 hosts 失败：{exc.__class__.__name__}"}, status=502)
 
@@ -410,9 +413,10 @@ def github_remote(request):
 
 @require_POST
 def github_remote_apply(request):
-    """拉取远程 hosts 源，替换本机 hosts 中相同域名的映射后合并写入。"""
+    """拉取远程 hosts 源，替换本机 hosts 中相同域名的映射后合并写入。source=ineo6（默认）/ github520。"""
+    url = REMOTE_SOURCES.get(request.GET.get("source"), REMOTE_HOSTS_URL)
     try:
-        text = _fetch_remote_hosts(REMOTE_HOSTS_URL)
+        text = _fetch_remote_hosts(url)
     except Exception as exc:
         return JsonResponse({"ok": False, "message": f"获取远程 hosts 失败：{exc.__class__.__name__}"}, status=502)
 
