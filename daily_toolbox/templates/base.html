@@ -28,6 +28,8 @@
       <p class="nav-section">网络工具</p>
       <a class="nav-link {% if request.resolver_match.url_name == 'github' %}active{% endif %}"
          href="{% url 'tools:github' %}"><i class="bi bi-github"></i> 访问github</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'downloader_page' %}active{% endif %}"
+         href="{% url 'tools:downloader_page' %}"><i class="bi bi-download"></i> 下载器</a>
 
       <p class="nav-section">文本处理</p>
       <a class="nav-link" href="#"><i class="bi bi-braces"></i> JSON 格式化</a>

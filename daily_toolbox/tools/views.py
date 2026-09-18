@@ -7,7 +7,9 @@ import shutil
 import socket
 import ssl
 import subprocess
+import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -928,3 +930,396 @@ def encode_charset(request):
     except (UnicodeError, LookupError) as exc:
         return JsonResponse({"ok": False, "error": f"转换失败：{exc}"}, status=400)
     return JsonResponse({"ok": True, "result": result})
+
+
+# ------------------------------------------------------------
+# 下载器（多线程分片 HTTP 下载 + libtorrent BT 下载）
+# ------------------------------------------------------------
+
+DOWNLOAD_DIR = Path.home() / "Downloads" / "DailyToolbox"
+_DL_THREADS = max(2, (os.cpu_count() or 4) - 2)   # 线程数 = CPU 核数 - 2
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DailyToolbox/1.0"
+
+_DL_TASKS = {}            # id -> 任务字典（JSON 安全字段 + 下划线开头的运行时字段）
+_BT_HANDLES = {}          # id -> libtorrent torrent_handle
+_DL_LOCK = threading.Lock()
+_DL_STATE_FILE = DOWNLOAD_DIR / ".tasks.json"
+_LT_SESSION = None
+_LT_LOCK = threading.Lock()
+
+
+def _sanitize_filename(name):
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", name).strip(" .")
+    return name[:150] or "download"
+
+
+def _filename_from_url(url, resp=None):
+    cd = resp.headers.get("Content-Disposition") if resp is not None else None
+    if cd:
+        m = re.search(r"filename\*=(?:UTF-8|utf-8)''([^;]+)", cd)
+        if m:
+            return _sanitize_filename(urllib.parse.unquote(m.group(1)))
+        m = re.search(r'filename="?([^";]+)"?', cd)
+        if m:
+            return _sanitize_filename(m.group(1))
+    basename = os.path.basename(urllib.parse.urlparse(url).path)
+    name = urllib.parse.unquote(basename)
+    if not name:
+        name = "download_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    return _sanitize_filename(name)
+
+
+def _parts_dir(name):
+    return DOWNLOAD_DIR / (name + ".dtparts")
+
+
+def _task_public(task):
+    """输出给前端的字段；同时计算实时进度与速度。"""
+    downloaded = task.get("downloaded", 0)
+    if task["type"] == "http":
+        pdir = _parts_dir(task["name"])
+        if pdir.exists():
+            downloaded = sum(p.stat().st_size for p in pdir.glob("part*"))
+        now = time.time()
+        last_dl = task.get("_last_dl")
+        if last_dl is not None and now > task.get("_last_ts", 0):
+            task["speed"] = max(0, (downloaded - last_dl) / (now - task["_last_ts"]))
+        task["_last_dl"] = downloaded
+        task["_last_ts"] = now
+        task["downloaded"] = downloaded
+    return {
+        "id": task["id"], "type": task["type"], "name": task["name"],
+        "size": task.get("size", 0), "downloaded": task.get("downloaded", 0),
+        "speed": task.get("speed", 0), "threads": task.get("threads", 0),
+        "peers": task.get("peers", 0), "status": task["status"],
+        "error": task.get("error", ""), "resumable": task.get("resumable", True),
+        "save_path": str(DOWNLOAD_DIR / task["name"]) if task["status"] == "completed" else str(DOWNLOAD_DIR),
+    }
+
+
+def _persist_tasks():
+    """任务列表落盘，重启后可恢复显示（下载中的任务标记为已暂停）。"""
+    with _DL_LOCK:
+        items = []
+        for t in _DL_TASKS.values():
+            status = "paused" if t["status"] == "downloading" else t["status"]
+            items.append({
+                "id": t["id"], "type": t["type"], "url": t.get("url", ""),
+                "magnet": t.get("magnet", ""), "torrent_file": t.get("torrent_file", ""),
+                "name": t["name"], "size": t.get("size", 0), "status": status,
+                "threads": t.get("threads", 0), "resumable": t.get("resumable", True),
+            })
+    try:
+        _DL_STATE_FILE.write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load_tasks_once():
+    global _tasks_loaded
+    if _tasks_loaded:
+        return
+    with _DL_LOCK:
+        _tasks_loaded = True
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    if not _DL_STATE_FILE.exists():
+        return
+    try:
+        for item in json.loads(_DL_STATE_FILE.read_text(encoding="utf-8")):
+            item["stop_evt"] = threading.Event()
+            item.setdefault("speed", 0)
+            item.setdefault("peers", 0)
+            item.setdefault("downloaded", 0)
+            _DL_TASKS[item["id"]] = item
+    except (OSError, ValueError, KeyError):
+        pass
+
+
+_tasks_loaded = False
+
+
+def _new_task(task_type, **kw):
+    task = {
+        "id": uuid.uuid4().hex[:12], "type": task_type, "name": kw.get("name", "…"),
+        "size": 0, "downloaded": 0, "speed": 0, "threads": 0, "peers": 0,
+        "status": "connecting", "error": "", "stop_evt": threading.Event(),
+    }
+    task.update(kw)
+    with _DL_LOCK:
+        _DL_TASKS[task["id"]] = task
+    return task
+
+
+def _probe_url(url):
+    """探测文件大小、是否支持 Range 断点续传、文件名。"""
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Range": "bytes=0-0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status == 206:
+            cr = resp.headers.get("Content-Range", "")
+            total = int(cr.rsplit("/", 1)[-1]) if "/" in cr else 0
+            return total, True, _filename_from_url(url, resp)
+        cl = resp.headers.get("Content-Length")
+        return (int(cl) if cl else 0), False, _filename_from_url(url, resp)
+
+
+def _download_part(task, idx, start, end, use_range=True):
+    """下载一个分片到 partN 文件；断点续传 = 从 partN 现有大小继续。"""
+    part = _parts_dir(task["name"]) / f"part{idx}"
+    expected = end - start + 1
+    have = part.stat().st_size if (use_range and part.exists()) else 0
+    if have >= expected:
+        return
+    while have < expected and not task["stop_evt"].is_set():
+        headers = {"User-Agent": _UA}
+        if use_range:
+            headers["Range"] = f"bytes={start + have}-{end}"
+        req = urllib.request.Request(task["url"], headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as resp, open(part, "ab" if use_range else "wb") as f:
+            while True:
+                if task["stop_evt"].is_set():
+                    return
+                block = resp.read(256 * 1024)
+                if not block:
+                    break
+                f.write(block)
+                have += len(block)
+        # 流提前结束但分片未完成时循环重发 Range 续传
+    if not use_range and have < expected and task["stop_evt"].is_set():
+        part.unlink(missing_ok=True)  # 不支持 Range 的任务暂停后无法续传，重来
+
+
+def _assemble(task, nparts):
+    dest = DOWNLOAD_DIR / task["name"]
+    i = 1
+    while dest.exists():
+        stem, suf = os.path.splitext(task["name"])
+        dest = DOWNLOAD_DIR / f"{stem} ({i}){suf}"
+        i += 1
+    pdir = _parts_dir(task["name"])
+    with open(dest, "wb") as out:
+        for idx in range(nparts):
+            with open(pdir / f"part{idx}", "rb") as src:
+                shutil.copyfileobj(src, out, 1024 * 1024)
+    shutil.rmtree(pdir, ignore_errors=True)
+    task["final_path"] = str(dest)
+
+
+def _http_worker(task):
+    try:
+        total, resumable, name = _probe_url(task["url"])
+        if not total:
+            raise ValueError("无法获取文件大小（服务器未返回 Content-Length）")
+        task["size"], task["resumable"], task["name"] = total, resumable, name
+        _parts_dir(task["name"]).mkdir(parents=True, exist_ok=True)
+        nparts = min(_DL_THREADS, max(1, -(-total // (1024 * 1024))))
+        task["threads"] = nparts if resumable else 1
+        task["status"] = "downloading"
+        if resumable:
+            chunk = -(-total // nparts)
+            with ThreadPoolExecutor(max_workers=nparts) as pool:
+                futs = [pool.submit(_download_part, task, i, i * chunk,
+                                    min((i + 1) * chunk, total) - 1)
+                        for i in range(nparts)]
+                for f in futs:
+                    f.result()
+        else:
+            task["threads"] = 1
+            _download_part(task, 0, 0, total - 1, use_range=False)
+        if task["stop_evt"].is_set():
+            task["status"] = "paused"
+            _persist_tasks()
+            return
+        _assemble(task, nparts if resumable else 1)
+        task["status"] = "completed"
+    except Exception as exc:  # noqa: BLE001
+        task["status"] = "error"
+        task["error"] = str(exc)
+    _persist_tasks()
+
+
+def _bt_session():
+    global _LT_SESSION
+    with _LT_LOCK:
+        if _LT_SESSION is None:
+            import libtorrent as lt
+            _LT_SESSION = lt.session()
+            _LT_SESSION.listen_on(6881, 6889)
+            state_file = DOWNLOAD_DIR / ".lt_state"
+            if state_file.exists():
+                try:
+                    _LT_SESSION.load_state(state_file.read_bytes())
+                except Exception:  # noqa: BLE001
+                    pass
+        return _LT_SESSION
+
+
+def _save_lt_state():
+    if _LT_SESSION is None:
+        return
+    try:
+        (DOWNLOAD_DIR / ".lt_state").write_bytes(_LT_SESSION.save_state())
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _bt_worker(task):
+    try:
+        import libtorrent as lt
+        ses = _bt_session()
+        if task.get("magnet"):
+            tp = lt.parse_magnet_uri(task["magnet"])
+            tp.save_path = str(DOWNLOAD_DIR)
+            handle = ses.add_torrent(tp)
+        else:
+            ti = lt.torrent_info(task["torrent_file"])
+            handle = ses.add_torrent({"ti": ti, "save_path": str(DOWNLOAD_DIR)})
+        _BT_HANDLES[task["id"]] = handle
+        task["status"] = "downloading"
+        while not task["stop_evt"].is_set():
+            st = handle.status()
+            task["size"] = st.total_wanted or task["size"]
+            task["downloaded"] = st.total_wanted_done
+            task["speed"] = st.download_rate
+            task["peers"] = st.num_peers
+            if st.name:
+                task["name"] = _sanitize_filename(st.name)
+            if st.total_wanted and st.total_wanted_done >= st.total_wanted:
+                task["status"] = "completed"
+                _persist_tasks()
+                return
+            task["stop_evt"].wait(1.0)
+        handle.pause()
+        task["status"] = "paused"
+    except Exception as exc:  # noqa: BLE001
+        task["status"] = "error"
+        task["error"] = str(exc)
+    _persist_tasks()
+
+
+def downloader_page(request):
+    _load_tasks_once()
+    return render(request, "downloader.html", {
+        "threads": _DL_THREADS,
+        "cpu_cores": os.cpu_count() or 0,
+        "save_dir": str(DOWNLOAD_DIR),
+    })
+
+
+@require_POST
+def downloader_http_add(request):
+    _load_tasks_once()
+    url = (request.POST.get("url") or "").strip()
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return JsonResponse({"ok": False, "error": "请输入有效的 http/https 下载地址"}, status=400)
+    task = _new_task("http", url=url)
+    threading.Thread(target=_http_worker, args=(task,), daemon=True).start()
+    return JsonResponse({"ok": True, "id": task["id"]})
+
+
+@require_POST
+def downloader_bt_add(request):
+    _load_tasks_once()
+    magnet = (request.POST.get("magnet") or "").strip()
+    torrent_file = ""
+    if request.FILES.get("file"):
+        f = request.FILES["file"]
+        if f.size > 5 * 1024 * 1024:
+            return JsonResponse({"ok": False, "error": "种子文件过大"}, status=400)
+        torrent_file = str(DOWNLOAD_DIR / _sanitize_filename(f"_{uuid.uuid4().hex[:8]}.torrent"))
+        DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        with open(torrent_file, "wb") as out:
+            for chunk in f.chunks():
+                out.write(chunk)
+    elif not magnet.startswith("magnet:?"):
+        return JsonResponse({"ok": False, "error": "请上传 .torrent 种子文件或输入磁力链接"}, status=400)
+    task = _new_task("bt", magnet=magnet if magnet.startswith("magnet:?") else "",
+                     torrent_file=torrent_file, name=magnet[:60] or "BT 任务")
+    threading.Thread(target=_bt_worker, args=(task,), daemon=True).start()
+    return JsonResponse({"ok": True, "id": task["id"]})
+
+
+@require_GET
+def downloader_status(request):
+    _load_tasks_once()
+    with _DL_LOCK:
+        tasks = list(_DL_TASKS.values())
+    return JsonResponse({"ok": True, "threads": _DL_THREADS,
+                         "tasks": [_task_public(t) for t in tasks]})
+
+
+@require_POST
+def downloader_pause(request):
+    task = _DL_TASKS.get(request.POST.get("id", ""))
+    if not task:
+        return JsonResponse({"ok": False, "error": "任务不存在"}, status=404)
+    task["stop_evt"].set()
+    return JsonResponse({"ok": True})
+
+
+@require_POST
+def downloader_resume(request):
+    task = _DL_TASKS.get(request.POST.get("id", ""))
+    if not task:
+        return JsonResponse({"ok": False, "error": "任务不存在"}, status=404)
+    if task["status"] in ("downloading", "connecting"):
+        return JsonResponse({"ok": True})
+    task["stop_evt"] = threading.Event()
+    task["error"] = ""
+    task["status"] = "connecting"
+    if task["type"] == "bt" and task["id"] in _BT_HANDLES:
+        _BT_HANDLES[task["id"]].resume()
+        threading.Thread(target=_bt_poll_existing, args=(task,), daemon=True).start()
+    else:
+        threading.Thread(target=_bt_worker if task["type"] == "bt" else _http_worker,
+                         args=(task,), daemon=True).start()
+    return JsonResponse({"ok": True})
+
+
+def _bt_poll_existing(task):
+    """BT 暂停后恢复：句柄仍在会话中，只重新轮询状态。"""
+    try:
+        handle = _BT_HANDLES[task["id"]]
+        task["status"] = "downloading"
+        while not task["stop_evt"].is_set():
+            st = handle.status()
+            task["size"] = st.total_wanted or task["size"]
+            task["downloaded"] = st.total_wanted_done
+            task["speed"] = st.download_rate
+            task["peers"] = st.num_peers
+            if st.total_wanted and st.total_wanted_done >= st.total_wanted:
+                task["status"] = "completed"
+                _persist_tasks()
+                return
+            task["stop_evt"].wait(1.0)
+        handle.pause()
+        task["status"] = "paused"
+    except Exception as exc:  # noqa: BLE001
+        task["status"] = "error"
+        task["error"] = str(exc)
+    _persist_tasks()
+
+
+@require_POST
+def downloader_remove(request):
+    task = _DL_TASKS.get(request.POST.get("id", ""))
+    if not task:
+        return JsonResponse({"ok": False, "error": "任务不存在"}, status=404)
+    task["stop_evt"].set()
+    if task["type"] == "bt" and task["id"] in _BT_HANDLES:
+        try:
+            _BT_HANDLES[task["id"]].pause()
+            _bt_session().remove_torrent(_BT_HANDLES[task["id"]])
+            _save_lt_state()
+        except Exception:  # noqa: BLE001
+            pass
+        _BT_HANDLES.pop(task["id"], None)
+    with _DL_LOCK:
+        _DL_TASKS.pop(task["id"], None)
+    # 清理未完成的分片与种子文件（保留已完成的最终文件）
+    if task["status"] != "completed":
+        shutil.rmtree(_parts_dir(task["name"]), ignore_errors=True)
+        if task.get("torrent_file"):
+            Path(task["torrent_file"]).unlink(missing_ok=True)
+    _persist_tasks()
+    return JsonResponse({"ok": True})

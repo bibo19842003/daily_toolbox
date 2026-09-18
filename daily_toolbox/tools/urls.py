@@ -23,4 +23,11 @@ urlpatterns = [
     path("api/encode/charset/", views.encode_charset, name="encode_charset"),
     path("timestamp/", views.timestamp_page, name="timestamp_page"),
     path("color/", views.color_page, name="color_page"),
+    path("downloader/", views.downloader_page, name="downloader_page"),
+    path("api/downloader/http/", views.downloader_http_add, name="downloader_http_add"),
+    path("api/downloader/bt/", views.downloader_bt_add, name="downloader_bt_add"),
+    path("api/downloader/status/", views.downloader_status, name="downloader_status"),
+    path("api/downloader/pause/", views.downloader_pause, name="downloader_pause"),
+    path("api/downloader/resume/", views.downloader_resume, name="downloader_resume"),
+    path("api/downloader/remove/", views.downloader_remove, name="downloader_remove"),
 ]

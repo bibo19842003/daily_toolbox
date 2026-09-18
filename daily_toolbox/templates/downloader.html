@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}下载器{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <h1 class="page-title">下载器</h1>
+    <p class="page-subtitle">多线程分片 HTTP 下载（{{ threads }} 线程 = {{ cpu_cores }} 核 - 2）· 断点续传 · BT/磁力链接</p>
+  </div>
+
+  <div class="row g-4">
+    <!-- 新建任务 -->
+    <div class="col-12">
+      <div class="card stat-card">
+        <div class="card-body">
+          <ul class="nav nav-pills mb-3" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tabHttp" type="button"><i class="bi bi-link-45deg me-1"></i>HTTP/HTTPS 链接</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tabBt" type="button"><i class="bi bi-magnet me-1"></i>BT 种子 / 磁力</button></li>
+          </ul>
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="tabHttp">
+              <div class="d-flex flex-wrap gap-2">
+                <input type="url" class="form-control font-monospace" id="httpUrl" placeholder="https://example.com/file.zip" style="flex:1;min-width:260px">
+                <button class="btn btn-primary px-4" id="httpAddBtn" type="button"><i class="bi bi-cloud-arrow-down me-1"></i>开始下载</button>
+              </div>
+            </div>
+            <div class="tab-pane fade" id="tabBt">
+              <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input type="file" class="form-control" id="btFile" accept=".torrent" style="width:auto">
+                <span class="text-secondary small">或</span>
+              </div>
+              <div class="d-flex flex-wrap gap-2">
+                <input type="text" class="form-control font-monospace" id="magnetUrl" placeholder="magnet:?xt=urn:btih:…" style="flex:1;min-width:260px">
+                <button class="btn btn-primary px-4" id="btAddBtn" type="button"><i class="bi bi-magnet me-1"></i>添加 BT 任务</button>
+              </div>
+            </div>
+          </div>
+          <div class="d-none alert alert-warning small py-2 mt-3 mb-0" id="addErr"></div>
+          <div class="text-secondary small mt-3">
+            <i class="bi bi-folder2 me-1"></i>保存目录：{{ save_dir }}
+            <span class="ms-3"><i class="bi bi-cpu me-1"></i>{{ threads }} 线程（CPU {{ cpu_cores }} 核 - 2）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务列表 -->
+    <div class="col-12">
+      <div id="taskList" class="d-flex flex-column gap-3"></div>
+      <div class="text-secondary text-center py-5 d-none" id="emptyTip">
+        <i class="bi bi-inbox fs-1 d-block mb-2"></i>暂无下载任务
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var CSRF = '{{ csrf_token }}';
+      var list = document.getElementById('taskList');
+
+      function fmtBytes(n) {
+        if (!n || n < 0) { return '0 B'; }
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
+        while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+        return n.toFixed(i ? 2 : 0) + ' ' + units[i];
+      }
+      function fmtSpeed(n) { return n ? fmtBytes(n) + '/s' : '—'; }
+      var STATUS_MAP = {
+        connecting: ['连接中', 'text-bg-secondary'],
+        downloading: ['下载中', 'text-bg-primary'],
+        paused: ['已暂停', 'text-bg-warning'],
+        completed: ['已完成', 'text-bg-success'],
+        error: ['失败', 'text-bg-danger'],
+        seeding: ['做种中', 'text-bg-info']
+      };
+      function post(url, body, cb) {
+        var fd = new FormData();
+        Object.keys(body || {}).forEach(function (k) { fd.append(k, body[k]); });
+        fd.append('csrfmiddlewaretoken', CSRF);
+        fetch(url, { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(cb);
+      }
+      function bindActions() {
+        list.querySelectorAll('button[data-act]').forEach(function (btn) {
+          btn.onclick = function () {
+            post('/api/downloader/' + btn.dataset.act + '/', { id: btn.dataset.id }, function () { refresh(); });
+          };
+        });
+      }
+      function render(tasks) {
+        document.getElementById('emptyTip').classList.toggle('d-none', tasks.length > 0);
+        list.innerHTML = tasks.map(function (t) {
+          var st = STATUS_MAP[t.status] || [t.status, 'text-bg-secondary'];
+          var pct = t.size ? Math.min(100, t.downloaded / t.size * 100) : 0;
+          var active = t.status === 'downloading';
+          var btns = '';
+          if (t.status === 'downloading' || t.status === 'connecting') {
+            btns = '<button class="btn btn-sm btn-outline-warning" data-act="pause" data-id="' + t.id + '"><i class="bi bi-pause"></i> 暂停</button>';
+          } else if (t.status === 'paused' || t.status === 'error') {
+            btns = '<button class="btn btn-sm btn-outline-primary" data-act="resume" data-id="' + t.id + '"><i class="bi bi-play"></i> 继续</button>';
+          }
+          btns += ' <button class="btn btn-sm btn-outline-danger" data-act="remove" data-id="' + t.id + '"><i class="bi bi-trash"></i></button>';
+          var meta = [];
+          if (t.type === 'http') { meta.push(t.threads + ' 线程'); }
+          if (t.type === 'bt') { meta.push(t.peers + ' 节点'); }
+          meta.push(fmtBytes(t.downloaded) + (t.size ? ' / ' + fmtBytes(t.size) : ''));
+          meta.push(fmtSpeed(t.speed));
+          if (t.status === 'paused' && !t.resumable) { meta.push('该服务器不支持断点续传'); }
+          return '<div class="card stat-card mb-0"><div class="card-body py-3">' +
+            '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">' +
+            '<div class="d-flex align-items-center gap-2 flex-wrap">' +
+            '<span class="badge ' + (t.type === 'http' ? 'text-bg-dark' : 'text-bg-info') + '">' + t.type.toUpperCase() + '</span>' +
+            '<span class="fw-semibold text-truncate" style="max-width:420px">' + t.name + '</span>' +
+            '<span class="badge ' + st[1] + '">' + st[0] + '</span></div>' +
+            '<div class="d-flex gap-2">' + btns + '</div></div>' +
+            '<div class="progress mb-2" style="height:8px">' +
+            '<div class="progress-bar' + (active ? ' progress-bar-striped progress-bar-animated' : '') +
+            (t.status === 'error' ? ' bg-danger' : '') + '" style="width:' + pct + '%"></div></div>' +
+            '<div class="d-flex flex-wrap gap-3 text-secondary small">' +
+            meta.map(function (m) { return '<span>' + m + '</span>'; }).join('') +
+            (t.error ? '<span class="text-danger">' + t.error + '</span>' : '') +
+            '</div></div></div>';
+        }).join('');
+        bindActions();
+      }
+      function refresh() {
+        fetch('/api/downloader/status/').then(function (r) { return r.json(); })
+          .then(function (d) { if (d.ok) { render(d.tasks); } });
+      }
+      refresh();
+      setInterval(refresh, 800);
+
+      function showAddErr(msg) {
+        var el = document.getElementById('addErr');
+        if (msg) { el.textContent = msg; el.classList.remove('d-none'); }
+        else { el.classList.add('d-none'); }
+      }
+      document.getElementById('httpAddBtn').addEventListener('click', function () {
+        showAddErr('');
+        var url = document.getElementById('httpUrl').value.trim();
+        if (!url) { return; }
+        post('/api/downloader/http/', { url: url }, function (d) {
+          if (!d.ok) { showAddErr(d.error); return; }
+          document.getElementById('httpUrl').value = '';
+          refresh();
+        });
+      });
+      document.getElementById('httpUrl').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { document.getElementById('httpAddBtn').click(); }
+      });
+      document.getElementById('btAddBtn').addEventListener('click', function () {
+        showAddErr('');
+        var fileInput = document.getElementById('btFile');
+        var magnet = document.getElementById('magnetUrl').value.trim();
+        if (!fileInput.files.length && !magnet) { showAddErr('请上传 .torrent 种子文件或输入磁力链接'); return; }
+        var fd = new FormData();
+        fd.append('csrfmiddlewaretoken', CSRF);
+        if (fileInput.files.length) { fd.append('file', fileInput.files[0]); }
+        if (magnet) { fd.append('magnet', magnet); }
+        fetch('/api/downloader/bt/', { method: 'POST', body: fd })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (!d.ok) { showAddErr(d.error); return; }
+            fileInput.value = '';
+            document.getElementById('magnetUrl').value = '';
+            refresh();
+          });
+      });
+    })();
+  </script>
+{% endblock %}
