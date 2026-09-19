@@ -177,6 +177,10 @@ def image_convert_page(request):
     return render(request, "convert.html")
 
 
+def compress_page(request):
+    return render(request, "compress.html")
+
+
 def json_page(request):
     return render(request, "json_format.html")
 
