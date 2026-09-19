@@ -38,15 +38,12 @@
       <p class="nav-section">文本处理</p>
       <a class="nav-link {% if request.resolver_match.url_name == 'json_page' %}active{% endif %}"
          href="{% url 'tools:json_page' %}"><i class="bi bi-braces"></i> JSON 格式化</a>
-      <a class="nav-link" href="#"><i class="bi bi-file-earmark-diff"></i> 文本对比</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'encode_page' %}active{% endif %}"
          href="{% url 'tools:encode_page' %}"><i class="bi bi-translate"></i> 编码转换</a>
 
       <p class="nav-section">开发辅助</p>
-      <a class="nav-link" href="#"><i class="bi bi-terminal"></i> 正则测试</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'timestamp_page' %}active{% endif %}"
          href="{% url 'tools:timestamp_page' %}"><i class="bi bi-clock-history"></i> 时间戳转换</a>
-      <a class="nav-link" href="#"><i class="bi bi-key"></i> UUID 生成</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'color_page' %}active{% endif %}"
          href="{% url 'tools:color_page' %}"><i class="bi bi-palette"></i> 颜色工具</a>
 
@@ -59,11 +56,6 @@
          href="{% url 'tools:image_convert_page' %}"><i class="bi bi-arrow-left-right"></i> 格式转换</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'resize_page' %}active{% endif %}"
          href="{% url 'tools:resize_page' %}"><i class="bi bi-file-earmark-image"></i> 图片缩小</a>
-
-      <p class="nav-section">日常办公</p>
-      <a class="nav-link" href="#"><i class="bi bi-calculator"></i> 单位换算</a>
-      <a class="nav-link" href="#"><i class="bi bi-calendar-week"></i> 万年历</a>
-      <a class="nav-link" href="#"><i class="bi bi-dice-5"></i> 随机决定</a>
 
       <p class="nav-section">电脑相关</p>
       <a class="nav-link {% if request.resolver_match.url_name == 'wifi_page' %}active{% endif %}"

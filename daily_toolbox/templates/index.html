@@ -4,14 +4,9 @@
 
 {% block content %}
   <!-- 页面标题 -->
-  <div class="d-flex flex-wrap align-items-end justify-content-between mb-4">
-    <div>
-      <h1 class="page-title">欢迎回来，Admin 👋</h1>
-      <p class="page-subtitle">这里是你的日常小工具箱，左侧导航可快速切换工具</p>
-    </div>
-    <button class="btn btn-primary" type="button">
-      <i class="bi bi-plus-lg me-1"></i>添加工具
-    </button>
+  <div class="mb-4">
+    <h1 class="page-title">Daily Toolbox 日常小工具箱</h1>
+    <p class="page-subtitle">本地运行的单机工具集合，图片/文件处理均在浏览器完成，不联网上传</p>
   </div>
 
   <!-- 统计卡片 -->
@@ -21,7 +16,7 @@
         <div class="card-body d-flex align-items-center gap-3">
           <span class="icon-tile bg-violet"><i class="bi bi-tools"></i></span>
           <div>
-            <div class="stat-value">13</div>
+            <div class="stat-value">14</div>
             <div class="stat-label">工具总数</div>
           </div>
         </div>
@@ -30,122 +25,86 @@
     <div class="col-6 col-xl-3">
       <div class="card stat-card">
         <div class="card-body d-flex align-items-center gap-3">
-          <span class="icon-tile bg-green"><i class="bi bi-graph-up-arrow"></i></span>
-          <div>
-            <div class="stat-value">26</div>
-            <div class="stat-label">今日使用</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-xl-3">
-      <div class="card stat-card">
-        <div class="card-body d-flex align-items-center gap-3">
-          <span class="icon-tile bg-orange"><i class="bi bi-collection"></i></span>
-          <div>
-            <div class="stat-value">4</div>
-            <div class="stat-label">工具分类</div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-xl-3">
-      <div class="card stat-card">
-        <div class="card-body d-flex align-items-center gap-3">
-          <span class="icon-tile bg-blue"><i class="bi bi-star"></i></span>
+          <span class="icon-tile bg-blue"><i class="bi bi-collection"></i></span>
           <div>
             <div class="stat-value">5</div>
-            <div class="stat-label">收藏工具</div>
+            <div class="stat-label">工具分类</div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 常用工具 -->
-  <h2 class="page-title fs-5 mb-3"><i class="bi bi-lightning-charge me-1 text-warning"></i>常用工具</h2>
-  <div class="row g-3">
+  <!-- ===== 网络工具 ===== -->
+  <h2 class="page-title fs-5 mb-3"><i class="bi bi-globe2 me-1 text-primary"></i>网络工具</h2>
+  <div class="row g-3 mb-4">
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card tool-card h-100">
+        <div class="card-body">
+          <span class="icon-tile bg-violet mb-3"><i class="bi bi-github"></i></span>
+          <div class="tool-name">访问 github</div>
+          <p class="tool-desc">解析 GitHub IP 并测延迟，支持社区 hosts 订阅源，一键写入本机 hosts 加速访问</p>
+          <a href="{% url 'tools:github' %}" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card tool-card h-100">
+        <div class="card-body">
+          <span class="icon-tile bg-green mb-3"><i class="bi bi-arrow-repeat"></i></span>
+          <div class="tool-name">github 地址转换</div>
+          <p class="tool-desc">clone / raw / 源码包 / release 资产链接一键生成加速下载地址</p>
+          <a href="{% url 'tools:gh_convert_page' %}" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+      <div class="card tool-card h-100">
+        <div class="card-body">
+          <span class="icon-tile bg-orange mb-3"><i class="bi bi-bookmark-star"></i></span>
+          <div class="tool-name">常用链接</div>
+          <p class="tool-desc">按分类管理书签收藏，支持排序与折叠，数据保存在本机 SQLite</p>
+          <a href="{% url 'tools:links_page' %}" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
+        </div>
+      </div>
+    </div>
+  </div>
 
-    {% comment %} 文本处理 {% endcomment %}
+  <!-- ===== 图片处理 ===== -->
+  <h2 class="page-title fs-5 mb-3"><i class="bi bi-image me-1 text-primary"></i>图片处理</h2>
+  <div class="row g-3 mb-4">
     <div class="col-12 col-md-6 col-xl-3">
       <div class="card tool-card h-100">
         <div class="card-body">
-          <span class="icon-tile bg-violet mb-3"><i class="bi bi-braces"></i></span>
-          <div class="tool-name">JSON 格式化</div>
-          <p class="tool-desc">校验、格式化与压缩 JSON 数据</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
+          <span class="icon-tile bg-violet mb-3"><i class="bi bi-list"></i></span>
+          <div class="tool-name">图标列表</div>
+          <p class="tool-desc">Bootstrap Icons 全部 2000+ 图标检索预览，点击复制类名</p>
+          <a href="{% url 'tools:icon_list' %}" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
         </div>
       </div>
     </div>
     <div class="col-12 col-md-6 col-xl-3">
       <div class="card tool-card h-100">
         <div class="card-body">
-          <span class="icon-tile bg-green mb-3"><i class="bi bi-terminal"></i></span>
-          <div class="tool-name">正则测试</div>
-          <p class="tool-desc">在线调试正则表达式，实时高亮匹配</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
+          <span class="icon-tile bg-orange mb-3"><i class="bi bi-arrow-left-right"></i></span>
+          <div class="tool-name">格式转换</div>
+          <p class="tool-desc">PNG / JPEG / WebP / BMP / ICO 多格式互转</p>
+          <a href="{% url 'tools:image_convert_page' %}" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
         </div>
       </div>
     </div>
-    <div class="col-12 col-md-6 col-xl-3">
-      <div class="card tool-card h-100">
-        <div class="card-body">
-          <span class="icon-tile bg-orange mb-3"><i class="bi bi-clock-history"></i></span>
-          <div class="tool-name">时间戳转换</div>
-          <p class="tool-desc">Unix 时间戳与日期时间互转</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-      <div class="card tool-card h-100">
-        <div class="card-body">
-          <span class="icon-tile bg-blue mb-3"><i class="bi bi-images"></i></span>
-          <div class="tool-name">图片压缩</div>
-          <p class="tool-desc">本地压缩图片，支持批量处理</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
-        </div>
-      </div>
-    </div>
+  </div>
 
-    {% comment %} 更多入口 {% endcomment %}
+  <!-- ===== 电脑相关 ===== -->
+  <h2 class="page-title fs-5 mb-3"><i class="bi bi-pc-display me-1 text-primary"></i>电脑相关</h2>
+  <div class="row g-3 mb-4">
     <div class="col-12 col-md-6 col-xl-3">
       <div class="card tool-card h-100">
         <div class="card-body">
-          <span class="icon-tile bg-pink mb-3"><i class="bi bi-calculator"></i></span>
-          <div class="tool-name">单位换算</div>
-          <p class="tool-desc">长度、重量、面积等常用单位换算</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-      <div class="card tool-card h-100">
-        <div class="card-body">
-          <span class="icon-tile bg-cyan mb-3"><i class="bi bi-palette"></i></span>
-          <div class="tool-name">颜色工具</div>
-          <p class="tool-desc">HEX / RGB / HSL 颜色格式转换</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-      <div class="card tool-card h-100">
-        <div class="card-body">
-          <span class="icon-tile bg-green mb-3"><i class="bi bi-file-earmark-diff"></i></span>
-          <div class="tool-name">文本对比</div>
-          <p class="tool-desc">逐行比较两段文本差异</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
-        </div>
-      </div>
-    </div>
-    <div class="col-12 col-md-6 col-xl-3">
-      <div class="card tool-card h-100">
-        <div class="card-body">
-          <span class="icon-tile bg-orange mb-3"><i class="bi bi-calendar-week"></i></span>
-          <div class="tool-name">万年历</div>
-          <p class="tool-desc">公历农历查询与节假日速览</p>
-          <a href="#" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
+          <span class="icon-tile bg-blue mb-3"><i class="bi bi-wifi"></i></span>
+          <div class="tool-name">本机 wifi 信息</div>
+          <p class="tool-desc">查看当前连接状态与本机已保存 WiFi 的明文密码</p>
+          <a href="{% url 'tools:wifi_page' %}" class="open-link">打开工具 <i class="bi bi-arrow-right"></i></a>
         </div>
       </div>
     </div>
