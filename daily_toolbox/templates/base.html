@@ -30,6 +30,8 @@
          href="{% url 'tools:github' %}"><i class="bi bi-github"></i> 访问github</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'gh_convert_page' %}active{% endif %}"
          href="{% url 'tools:gh_convert_page' %}"><i class="bi bi-github"></i> github地址转换</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'links_page' %}active{% endif %}"
+         href="{% url 'tools:links_page' %}"><i class="bi bi-bookmark-star"></i> 常用链接</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'downloader_page' %}active{% endif %}"
          href="{% url 'tools:downloader_page' %}"><i class="bi bi-download"></i> 下载器</a>
 

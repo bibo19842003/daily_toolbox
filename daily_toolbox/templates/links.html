@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}常用链接{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <h1 class="page-title">常用链接</h1>
+    <p class="page-subtitle">按分类管理的书签收藏，数据保存在本机 SQLite 数据库</p>
+  </div>
+
+  <!-- 新增表单 -->
+  <style>
+      /* 排序按钮：透明背景、无边框、 slate 灰，悬停变紫 */
+      .btn-move { border: 0; background: transparent; color: #94a3b8;
+                  padding: .15rem .4rem; border-radius: .375rem; line-height: 1.2; }
+      .btn-move:hover { color: #7c3aed; background: rgba(124, 58, 237, .10); }
+      .btn-move:active { color: #6d28d9; }
+    </style>
+    <div class="card stat-card mb-4">
+    <div class="card-body">
+      <form id="addForm" class="row g-2 align-items-end">
+        <div class="col-md-2">
+          <label class="form-label small fw-semibold mb-1">分类</label>
+          <input class="form-control" id="fCategory" list="catList" placeholder="分类" required>
+          <datalist id="catList"></datalist>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small fw-semibold mb-1">名称</label>
+          <input class="form-control" id="fName" placeholder="名称" required>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small fw-semibold mb-1">地址</label>
+          <input class="form-control" id="fUrl" placeholder="https://…（可省略 https://）" required>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus-lg me-1"></i>添加</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 分类分组展示 -->
+  <div id="linkGroups"></div>
+
+  <!-- 编辑弹窗 -->
+  <div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header py-2">
+          <h6 class="modal-title"><i class="bi bi-pencil me-1"></i>修改链接</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="eId">
+          <div class="mb-2">
+            <label class="form-label small mb-1">分类</label>
+            <input class="form-control form-control-sm" id="eCategory">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1">名称</label>
+            <input class="form-control form-control-sm" id="eName">
+          </div>
+          <div>
+            <label class="form-label small mb-1">地址</label>
+            <input class="form-control form-control-sm" id="eUrl">
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+          <button class="btn btn-sm btn-primary" id="saveEditBtn">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var csrf = '{{ csrf_token }}';
+      var editModal = new bootstrap.Modal(document.getElementById('editModal'));
+
+      function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+      function api(method, url, body) {
+        return fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+          body: body ? JSON.stringify(body) : undefined
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (d) {
+            if (!r.ok) { throw new Error(d.error || ('请求失败 ' + r.status)); }
+            return d;
+          });
+        });
+      }
+      function toast(kind, msg) {
+        var box = document.createElement('div');
+        box.className = 'alert alert-' + kind + ' py-2 px-3 shadow-sm position-fixed';
+        box.style.cssText = 'top:76px;right:24px;z-index:2000;min-width:220px';
+        box.innerHTML = msg;
+        document.body.appendChild(box);
+        setTimeout(function () { box.remove(); }, 2200);
+      }
+
+      // ---------- 渲染：按分类分组（分类按自定义排序） ----------
+      function render(links, categories) {
+        var groups = {};
+        links.forEach(function (l) {
+          (groups[l.category] = groups[l.category] || []).push(l);
+        });
+        // 分类顺序：以数据库 Category.sort 为准，未知分类追加在后
+        var cats = categories.map(function (c) { return c.name; })
+          .filter(function (c) { return groups[c]; });
+        Object.keys(groups).forEach(function (c) {
+          if (cats.indexOf(c) < 0) { cats.push(c); }
+        });
+        var catOpts = cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
+        var dl = document.getElementById('catList');
+        dl.innerHTML = catOpts;
+
+        var html = cats.map(function (c, ci) {
+          var rows = groups[c].map(function (l) {
+            return '<div class="d-flex align-items-center gap-2 py-2 border-bottom flex-wrap">' +
+              '<a href="' + esc(l.url) + '" target="_blank" class="fw-semibold text-decoration-none">' +
+              '<i class="bi bi-link-45deg me-1"></i>' + esc(l.name) + '</a>' +
+              '<span class="text-secondary small text-truncate" style="max-width:340px">' + esc(l.url) + '</span>' +
+              '<span class="ms-auto d-flex gap-1">' +
+              '<button class="btn-move" data-up="' + l.id + '" title="上移"><i class="bi bi-arrow-up"></i></button>' +
+              '<button class="btn-move" data-down="' + l.id + '" title="下移"><i class="bi bi-arrow-down"></i></button>' +
+              '<button class="btn btn-sm btn-outline-secondary" data-edit="' + l.id + '"><i class="bi bi-pencil"></i> 修改</button>' +
+              '<button class="btn btn-sm btn-outline-danger" data-del="' + l.id + '" data-name="' + esc(l.name) + '"><i class="bi bi-trash"></i> 删除</button>' +
+              '</span></div>';
+          }).join('');
+          return '<div class="card stat-card mb-3"><div class="card-header bg-transparent d-flex align-items-center py-2">' +
+            '<button class="btn-move me-1" data-btn-cat="' + ci + '" title="折叠/展开"><i class="bi bi-chevron-down"></i></button>' +
+            '<i class="bi bi-folder2-open me-2 text-primary"></i><span class="fw-semibold" style="font-size:1.25rem">' + esc(c) + '</span>' +
+            '<span class="badge bg-primary-subtle text-primary ms-2">' + groups[c].length + '</span>' +
+            '<span class="ms-auto d-flex gap-1">' +
+            '<button class="btn-move" data-cat-up="' + esc(c) + '" title="分类上移"><i class="bi bi-arrow-up"></i></button>' +
+            '<button class="btn-move" data-cat-down="' + esc(c) + '" title="分类下移"><i class="bi bi-arrow-down"></i></button>' +
+            '</span></div>' +
+            '<div class="card-body py-1" data-body-cat="' + ci + '">' + (rows || '') + '</div></div>';
+        }).join('');
+        document.getElementById('linkGroups').innerHTML =
+          html || '<div class="text-secondary text-center py-5"><i class="bi bi-bookmark-star fs-1 d-block mb-2"></i>暂无链接，先在上方添加一条</div>';
+
+        // 折叠/展开分类（状态存 localStorage，下次加载保持）
+        var collapsed = [];
+        try { collapsed = JSON.parse(localStorage.getItem('dtb_collapsed_cats') || '[]'); }
+        catch (e) { collapsed = []; }
+        document.querySelectorAll('button[data-btn-cat]').forEach(function (b) {
+          var name = cats[+b.dataset.btnCat];
+          if (collapsed.indexOf(name) >= 0) {        // 恢复上次的折叠状态
+            document.querySelector('[data-body-cat="' + b.dataset.btnCat + '"]').classList.add('d-none');
+            b.querySelector('i').className = 'bi bi-chevron-right';
+          }
+          b.addEventListener('click', function () {
+            var body = document.querySelector('[data-body-cat="' + b.dataset.btnCat + '"]');
+            var hidden = body.classList.toggle('d-none');
+            b.querySelector('i').className = hidden ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+            var i = collapsed.indexOf(cats[+b.dataset.btnCat]);
+            if (hidden && i < 0) { collapsed.push(cats[+b.dataset.btnCat]); }
+            if (!hidden && i >= 0) { collapsed.splice(i, 1); }
+            localStorage.setItem('dtb_collapsed_cats', JSON.stringify(collapsed));
+          });
+        });
+
+        // 绑定事件
+        document.querySelectorAll('button[data-del]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            if (!confirm('确定删除「' + b.dataset.name + '」？')) { return; }
+            api('DELETE', '/api/links/' + b.dataset.del + '/')
+              .then(function () { toast('success', '已删除'); load(); })
+              .catch(function (e) { toast('danger', esc(e.message)); });
+          });
+        });
+        document.querySelectorAll('button[data-edit]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var l = links.find(function (x) { return x.id === +b.dataset.edit; });
+            document.getElementById('eId').value = l.id;
+            document.getElementById('eCategory').value = l.category;
+            document.getElementById('eName').value = l.name;
+            document.getElementById('eUrl').value = l.url;
+            editModal.show();
+          });
+        });
+        // 条目上移/下移
+        [['data-up', 'up'], ['data-down', 'down']].forEach(function (p) {
+          document.querySelectorAll('button[' + p[0] + ']').forEach(function (b) {
+            b.addEventListener('click', function () {
+              api('POST', '/api/links/' + b.getAttribute(p[0]) + '/move/', { direction: p[1] })
+                .then(load)
+                .catch(function (e) { toast('danger', esc(e.message)); });
+            });
+          });
+        });
+        // 分类上移/下移
+        [['data-cat-up', 'up'], ['data-cat-down', 'down']].forEach(function (p) {
+          document.querySelectorAll('button[' + p[0] + ']').forEach(function (b) {
+            b.addEventListener('click', function () {
+              api('POST', '/api/links/categories/move/',
+                  { name: b.getAttribute(p[0]), direction: p[1] })
+                .then(load)
+                .catch(function (e) { toast('danger', esc(e.message)); });
+            });
+          });
+        });
+      }
+
+      function load() {
+        api('GET', '/api/links/').then(function (d) { render(d.links, d.categories); })
+          .catch(function (e) { toast('danger', esc(e.message)); });
+      }
+
+      // ---------- 新增 ----------
+      document.getElementById('addForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        api('POST', '/api/links/', {
+          category: document.getElementById('fCategory').value,
+          name: document.getElementById('fName').value,
+          url: document.getElementById('fUrl').value
+        }).then(function () {
+          toast('success', '已添加');
+          document.getElementById('addForm').reset();
+          load();
+        }).catch(function (er) { toast('danger', esc(er.message)); });
+      });
+
+      // ---------- 修改 ----------
+      document.getElementById('saveEditBtn').addEventListener('click', function () {
+        api('PUT', '/api/links/' + document.getElementById('eId').value + '/', {
+          category: document.getElementById('eCategory').value,
+          name: document.getElementById('eName').value,
+          url: document.getElementById('eUrl').value
+        }).then(function () {
+          editModal.hide();
+          toast('success', '已保存');
+          load();
+        }).catch(function (er) { toast('danger', esc(er.message)); });
+      });
+
+      load();
+    })();
+  </script>
+{% endblock %}

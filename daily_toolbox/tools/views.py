@@ -181,6 +181,156 @@ def json_page(request):
     return render(request, "json_format.html")
 
 
+# ---------- 常用链接 CRUD ----------
+import json as _json
+
+from .models import Link, Category
+
+
+def links_page(request):
+    return render(request, "links.html")
+
+
+def _link_dict(l):
+    return {"id": l.id, "category": l.category, "name": l.name,
+            "url": l.url, "sort": l.sort}
+
+
+def _sync_categories():
+    """已使用但不在分类表中的分类自动补录（排在末尾，按名称）"""
+    existing = set(Category.objects.values_list("name", flat=True))
+    used = set(Link.objects.values_list("category", flat=True).distinct())
+    missing = sorted(used - existing)
+    if not missing:
+        return
+    top = Category.objects.order_by("-sort").first()
+    base = (top.sort + 1) if top else 0
+    for i, name in enumerate(missing):
+        Category.objects.create(name=name, sort=base + i)
+
+
+def link_list(request):
+    """GET 列表（含分类排序信息）/ POST 新增"""
+    if request.method == "GET":
+        _sync_categories()
+        cats = [{"name": c.name, "sort": c.sort}
+                for c in Category.objects.all()]
+        data = [_link_dict(l) for l in Link.objects.all()]
+        return JsonResponse({"links": data, "categories": cats})
+
+    try:
+        body = _json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+
+    category = str(body.get("category", "")).strip()
+    name = str(body.get("name", "")).strip()
+    url = str(body.get("url", "")).strip()
+    if not category or not name or not url:
+        return JsonResponse({"error": "分类、名称、地址均不能为空"}, status=400)
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url
+
+    cat, created = Category.objects.get_or_create(name=category)
+    if created:
+        top = Category.objects.exclude(pk=cat.pk).order_by("-sort").first()
+        cat.sort = (top.sort + 1) if top else 0
+        cat.save()
+    top_item = Link.objects.filter(category=category).order_by("-sort").first()
+    link = Link.objects.create(
+        category=category, name=name, url=url,
+        sort=(top_item.sort + 1) if top_item else 0)
+    return JsonResponse({"link": _link_dict(link)}, status=201)
+
+
+def _swap(seq, idx, direction):
+    """交换 seq[idx] 与相邻元素的 sort 值；返回是否发生交换"""
+    j = idx - 1 if direction == "up" else idx + 1
+    if j < 0 or j >= len(seq):
+        return False
+    a, b = seq[idx], seq[j]
+    a.sort, b.sort = j, idx          # seq 的 sort 已归一化为 0..n-1
+    a.save()
+    b.save()
+    return True
+
+
+def link_move(request, pk):
+    """POST 上移/下移条目（分类内）"""
+    link = Link.objects.filter(pk=pk).first()
+    if not link:
+        return JsonResponse({"error": "链接不存在"}, status=404)
+    try:
+        body = _json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+    direction = body.get("direction")
+    if direction not in ("up", "down"):
+        return JsonResponse({"error": "direction 须为 up/down"}, status=400)
+
+    siblings = list(Link.objects.filter(category=link.category)
+                    .order_by("sort", "id"))
+    for i, s in enumerate(siblings):  # 归一化，避免历史数据 sort 相同无法交换
+        if s.sort != i:
+            s.sort = i
+            s.save()
+    _swap(siblings, siblings.index(link), direction)
+    return JsonResponse({"ok": True})
+
+
+def category_move(request):
+    """POST 上移/下移分类"""
+    try:
+        body = _json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+    name = str(body.get("name", "")).strip()
+    direction = body.get("direction")
+    if direction not in ("up", "down"):
+        return JsonResponse({"error": "direction 须为 up/down"}, status=400)
+
+    _sync_categories()
+    cats = list(Category.objects.order_by("sort", "id"))
+    idx = next((i for i, c in enumerate(cats) if c.name == name), None)
+    if idx is None:
+        return JsonResponse({"error": "分类不存在"}, status=404)
+    for i, c in enumerate(cats):      # 归一化
+        if c.sort != i:
+            c.sort = i
+            c.save()
+    _swap(cats, idx, direction)
+    return JsonResponse({"ok": True})
+
+
+def link_detail(request, pk):
+    """PUT 修改 / DELETE 删除"""
+    link = Link.objects.filter(pk=pk).first()
+    if not link:
+        return JsonResponse({"error": "链接不存在"}, status=404)
+
+    if request.method == "DELETE":
+        link.delete()
+        return JsonResponse({"ok": True})
+
+    if request.method == "PUT":
+        try:
+            body = _json.loads(request.body or b"{}")
+        except ValueError:
+            return JsonResponse({"error": "请求体不是合法 JSON"}, status=400)
+        category = str(body.get("category", "")).strip()
+        name = str(body.get("name", "")).strip()
+        url = str(body.get("url", "")).strip()
+        if not category or not name or not url:
+            return JsonResponse({"error": "分类、名称、地址均不能为空"}, status=400)
+        if not re.match(r"^https?://", url, re.I):
+            url = "https://" + url
+        link.category, link.name, link.url = category, name, url
+        link.save()
+        return JsonResponse({"link": _link_dict(link)})
+
+    return JsonResponse({"error": "不支持的方法"}, status=405)
+
+
 def github_page(request):
     try:
         current = [line for line in _read_hosts_text().splitlines() if _is_github_com_mapping(line)]
