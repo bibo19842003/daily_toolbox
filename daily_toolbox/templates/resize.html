@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}图片缩小{% endblock %}
+
+{% block content %}
+  <style>
+    .dropzone { border: 2px dashed #c7d2fe; border-radius: .75rem; background: #fafbff;
+                transition: all .15s ease; cursor: pointer; }
+    .dropzone:hover, .dropzone.drag { border-color: #7c3aed; background: #f5f3ff; }
+    .thumb { width: 84px; height: 64px; object-fit: cover; border-radius: .375rem;
+             border: 1px solid #e5e7eb; background: #f8fafc; }
+    .ratio-badge { font-size: .75rem; }
+    .mode-card { border: 1.5px solid #e5e7eb; border-radius: .5rem; padding: .6rem .9rem;
+                 cursor: pointer; transition: all .12s; }
+    .mode-card:hover { border-color: #c4b5fd; }
+    .mode-card.on { border-color: #7c3aed; background: #f5f3ff; }
+  </style>
+
+  <div class="page-header">
+    <h4 class="page-title"><i class="bi bi-file-earmark-image me-2"></i>图片缩小</h4>
+    <p class="page-subtitle">等比缩小图片尺寸，输出保持原有格式，批量处理，全部在浏览器本地完成</p>
+  </div>
+
+  <div class="card stat-card mb-4">
+    <div class="card-body">
+      <div id="dropZone" class="dropzone text-center py-5">
+        <i class="bi bi-cloud-arrow-up fs-1 text-primary"></i>
+        <p class="mb-1 fw-semibold">点击选择 或 拖拽图片到此处</p>
+        <p class="text-secondary small mb-0">支持 PNG / JPEG / WebP，可多选；GIF、BMP 等无法在浏览器原样编码的格式会被跳过并提示</p>
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      </div>
+
+      <div class="row g-3 mt-1 align-items-end">
+        <div class="col-md-6">
+          <label class="form-label small fw-semibold mb-1">缩小方式</label>
+          <div class="d-flex gap-2">
+            <div class="mode-card on flex-fill" data-mode="percent">
+              <i class="bi bi-percent me-1 text-primary"></i>按比例
+            </div>
+            <div class="mode-card flex-fill" data-mode="width">
+              <i class="bi bi-arrows-collapse me-1 text-primary"></i>指定宽度
+            </div>
+            <div class="mode-card flex-fill" data-mode="height">
+              <i class="bi bi-arrows-vertical-collapse me-1 text-primary"></i>指定高度
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3" id="pctBox">
+          <label class="form-label small fw-semibold mb-1">缩放比例</label>
+          <div class="input-group">
+            <input type="number" class="form-control" id="pctInput" min="5" max="100" step="5" value="50">
+            <span class="input-group-text">%</span>
+          </div>
+        </div>
+        <div class="col-md-3 d-none" id="wBox">
+          <label class="form-label small fw-semibold mb-1">目标宽度</label>
+          <div class="input-group">
+            <input type="number" class="form-control" id="wInput" min="1" value="800">
+            <span class="input-group-text">px</span>
+          </div>
+        </div>
+        <div class="col-md-3 d-none" id="hBox">
+          <label class="form-label small fw-semibold mb-1">目标高度</label>
+          <div class="input-group">
+            <input type="number" class="form-control" id="hInput" min="1" value="600">
+            <span class="input-group-text">px</span>
+          </div>
+        </div>
+        <div class="col-md-3 d-grid">
+          <button class="btn btn-primary" id="goBtn" disabled>
+            <i class="bi bi-arrows-angle-contract me-1"></i>开始缩小
+          </button>
+        </div>
+      </div>
+      <div class="form-check mt-2">
+        <input class="form-check-input" type="checkbox" id="noUp" checked>
+        <label class="form-check-label small" for="noUp">不放大（目标尺寸大于原图时保持原始尺寸）</label>
+      </div>
+    </div>
+  </div>
+
+  <div id="results"></div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var files = [];
+      var mode = 'percent';
+      var zone = document.getElementById('dropZone');
+      var input = document.getElementById('fileInput');
+      var goBtn = document.getElementById('goBtn');
+      var results = document.getElementById('results');
+
+      function fmtSize(n) {
+        if (n < 1024) { return n + ' B'; }
+        if (n < 1024 * 1024) { return (n / 1024).toFixed(1) + ' KB'; }
+        return (n / 1024 / 1024).toFixed(2) + ' MB';
+      }
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      // ---------- 模式切换 ----------
+      document.querySelectorAll('.mode-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+          document.querySelectorAll('.mode-card').forEach(function (c) { c.classList.remove('on'); });
+          card.classList.add('on');
+          mode = card.dataset.mode;
+          document.getElementById('pctBox').classList.toggle('d-none', mode !== 'percent');
+          document.getElementById('wBox').classList.toggle('d-none', mode !== 'width');
+          document.getElementById('hBox').classList.toggle('d-none', mode !== 'height');
+        });
+      });
+
+      // ---------- 上传 ----------
+      zone.addEventListener('click', function () { input.click(); });
+      input.addEventListener('change', function () { addFiles(input.files); input.value = ''; });
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) { e.preventDefault(); zone.classList.add('drag'); });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) { e.preventDefault(); zone.classList.remove('drag'); });
+      });
+      zone.addEventListener('drop', function (e) { addFiles(e.dataTransfer.files); });
+
+      function addFiles(list) {
+        Array.prototype.forEach.call(list, function (f) {
+          if (['image/png', 'image/jpeg', 'image/webp'].indexOf(f.type) < 0) { return; }
+          files.push({ file: f, url: URL.createObjectURL(f) });
+        });
+        goBtn.disabled = files.length === 0;
+        if (files.length) {
+          results.innerHTML = '<div class="alert alert-secondary py-2 small mb-3"><i class="bi bi-check2-circle me-1"></i>已选择 ' +
+            files.length + ' 张图片，选择缩小方式后点击「开始缩小」</div>';
+        }
+      }
+
+      function loadImage(url) {
+        return new Promise(function (resolve, reject) {
+          var img = new Image();
+          img.onload = function () { resolve(img); };
+          img.onerror = reject;
+          img.src = url;
+        });
+      }
+
+      // 计算目标尺寸（保持宽高比）
+      function targetSize(w, h) {
+        var tw = w, th = h;
+        if (mode === 'percent') {
+          var p = Math.min(100, Math.max(5, +document.getElementById('pctInput').value || 50)) / 100;
+          tw = w * p; th = h * p;
+        } else if (mode === 'width') {
+          var tw2 = Math.max(1, +document.getElementById('wInput').value || 800);
+          tw = tw2; th = h * tw2 / w;
+        } else {
+          var th2 = Math.max(1, +document.getElementById('hInput').value || 600);
+          th = th2; tw = w * th2 / h;
+        }
+        if (document.getElementById('noUp').checked) {
+          if (tw >= w) { tw = w; th = h; }         // 目标更大 → 保持原尺寸
+        }
+        return { w: Math.max(1, Math.round(tw)), h: Math.max(1, Math.round(th)) };
+      }
+
+      async function resizeOne(item) {
+        var img = await loadImage(item.url);
+        var t = targetSize(img.naturalWidth, img.naturalHeight);
+        var mime = item.file.type;                  // 保持原格式
+        var canvas = document.createElement('canvas');
+        canvas.width = t.w; canvas.height = t.h;
+        var ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        if (mime === 'image/jpeg') { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, t.w, t.h); }
+        ctx.drawImage(img, 0, 0, t.w, t.h);
+        var q = (mime === 'image/png') ? undefined : 0.92;   // 缩小不压质量，仅用较高固定质量
+        var blob = await new Promise(function (resolve) {
+          canvas.toBlob(resolve, mime, q);
+        });
+        if (!blob || blob.type !== mime) { throw new Error('encode'); }
+        return { blob: blob, sw: img.naturalWidth, sh: img.naturalHeight, w: t.w, h: t.h };
+      }
+
+      function extOf(mime) {
+        return { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[mime] || 'img';
+      }
+
+      goBtn.addEventListener('click', async function () {
+        if (!files.length) { return; }
+        goBtn.disabled = true;
+        goBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>处理中…';
+        var out = [];
+        for (var i = 0; i < files.length; i++) {
+          try {
+            var res = await resizeOne(files[i]);
+            out.push({ name: files[i].file.name.replace(/\.[^.]+$/, '') + '_resized.' + extOf(files[i].file.type),
+                       blob: res.blob, url: URL.createObjectURL(res.blob),
+                       origin: files[i].file, sw: res.sw, sh: res.sh, w: res.w, h: res.h });
+          } catch (e) {
+            out.push({ name: files[i].file.name, error: true });
+          }
+        }
+        renderResults(out);
+        goBtn.disabled = false;
+        goBtn.innerHTML = '<i class="bi bi-arrows-angle-contract me-1"></i>开始缩小';
+      });
+
+      function renderResults(list) {
+        var rows = list.map(function (r, i) {
+          if (r.error) {
+            return '<div class="d-flex align-items-center gap-3 py-2 border-bottom">' +
+              '<i class="bi bi-x-circle text-danger"></i>' +
+              '<span class="text-danger small">无法原样缩小（浏览器不能编码该格式）：' + esc(r.name) + '</span></div>';
+          }
+          var d = r.origin.size - r.blob.size;
+          var pct = r.origin.size ? Math.round(d * 100 / r.origin.size) : 0;
+          var badge = d > 0
+            ? '<span class="badge ratio-badge bg-success-subtle text-success">-' + pct + '%</span>'
+            : (d < 0
+              ? '<span class="badge ratio-badge bg-warning-subtle text-warning">+' + (-pct) + '%</span>'
+              : '<span class="badge ratio-badge bg-secondary-subtle text-secondary">±0%</span>');
+          return '<div class="d-flex align-items-center gap-3 py-2 border-bottom flex-wrap">' +
+            '<img class="thumb" src="' + r.url + '">' +
+            '<div><div class="fw-semibold small">' + esc(r.name) + '</div>' +
+            '<div class="text-secondary" style="font-size:.8rem">' + fmtSize(r.origin.size) +
+            ' → <b class="text-body">' + fmtSize(r.blob.size) + '</b> ' + badge +
+            ' <span class="ms-1 text-secondary">' + r.sw + '×' + r.sh + ' → ' + r.w + '×' + r.h + '</span></div></div>' +
+            '<span class="ms-auto d-flex gap-2">' +
+            '<button class="btn btn-sm btn-outline-primary" data-dl="' + i + '">' +
+            '<i class="bi bi-download"></i> 下载</button></span></div>';
+        }).join('');
+        var okCount = list.filter(function (r) { return !r.error; }).length;
+        var allBtn = okCount
+          ? '<div class="text-end mt-3"><button class="btn btn-outline-secondary" id="dlAll">' +
+            '<i class="bi bi-download me-1"></i>逐个下载全部（' + okCount + ' 张）</button></div>'
+          : '';
+        results.innerHTML = rows + allBtn;
+
+        list.forEach(function (r, i) {
+          if (r.error) { return; }
+          var b = results.querySelector('button[data-dl="' + i + '"]');
+          if (b) { b.addEventListener('click', function () { download(r); }); }
+        });
+        var da = document.getElementById('dlAll');
+        if (da) {
+          da.addEventListener('click', function () {
+            list.forEach(function (r) { if (!r.error) { download(r); } });
+          });
+        }
+      }
+
+      function download(r) {
+        var a = document.createElement('a');
+        a.href = r.url;
+        a.download = r.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    })();
+  </script>
+{% endblock %}

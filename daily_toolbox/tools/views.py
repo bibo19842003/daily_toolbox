@@ -181,6 +181,10 @@ def compress_page(request):
     return render(request, "compress.html")
 
 
+def resize_page(request):
+    return render(request, "resize.html")
+
+
 def json_page(request):
     return render(request, "json_format.html")
 

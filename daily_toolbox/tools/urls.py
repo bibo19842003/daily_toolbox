@@ -11,6 +11,7 @@ urlpatterns = [
     path("github-convert/", views.gh_convert_page, name="gh_convert_page"),
     path("convert/", views.image_convert_page, name="image_convert_page"),
     path("compress/", views.compress_page, name="compress_page"),
+    path("resize/", views.resize_page, name="resize_page"),
     path("json/", views.json_page, name="json_page"),
     path("links/", views.links_page, name="links_page"),
     path("api/links/", views.link_list, name="link_list"),
