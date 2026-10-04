@@ -126,7 +126,7 @@
             return '<div class="d-flex align-items-center gap-2 py-2 border-bottom flex-wrap">' +
               '<a href="' + esc(l.url) + '" target="_blank" class="fw-semibold text-decoration-none">' +
               '<i class="bi bi-link-45deg me-1"></i>' + esc(l.name) + '</a>' +
-              '<span class="text-secondary small text-truncate" style="max-width:340px">' + esc(l.url) + '</span>' +
+              '<span class="text-secondary small flex-grow-1" style="min-width:260px;word-break:break-all;overflow-wrap:anywhere">' + esc(l.url) + '</span>' +
               '<span class="ms-auto d-flex gap-1">' +
               '<button class="btn-move" data-up="' + l.id + '" title="上移"><i class="bi bi-arrow-up"></i></button>' +
               '<button class="btn-move" data-down="' + l.id + '" title="下移"><i class="bi bi-arrow-down"></i></button>' +
