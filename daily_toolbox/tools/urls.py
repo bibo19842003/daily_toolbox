@@ -12,6 +12,7 @@ urlpatterns = [
     path("convert/", views.image_convert_page, name="image_convert_page"),
     path("compress/", views.compress_page, name="compress_page"),
     path("resize/", views.resize_page, name="resize_page"),
+    path("crop/", views.crop_page, name="crop_page"),
     path("json/", views.json_page, name="json_page"),
     path("links/", views.links_page, name="links_page"),
     path("api/links/", views.link_list, name="link_list"),

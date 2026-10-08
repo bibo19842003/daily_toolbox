@@ -185,6 +185,10 @@ def resize_page(request):
     return render(request, "resize.html")
 
 
+def crop_page(request):
+    return render(request, "crop.html")
+
+
 def json_page(request):
     return render(request, "json_format.html")
 

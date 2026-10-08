@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+
+{% block title %}图片裁剪{% endblock %}
+
+{% block content %}
+  <style>
+    .dropzone { border: 2px dashed #c7d2fe; border-radius: .75rem; background: #fafbff;
+                transition: all .15s ease; cursor: pointer; }
+    .dropzone:hover, .dropzone.drag { border-color: #7c3aed; background: #f5f3ff; }
+    #cropStage { max-width: 100%; cursor: crosshair; touch-action: none;
+                 border-radius: .375rem; background: #f1f5f9; }
+    .thumb { width: 84px; height: 64px; object-fit: cover; border-radius: .375rem;
+             border: 1px solid #e5e7eb; background: #f8fafc; }
+    .coord-input { width: 5.2rem; }
+  </style>
+
+  <div class="page-header mb-4">
+    <h1 class="page-title">图片裁剪</h1>
+    <p class="page-subtitle">拖拽选取裁剪区域，支持比例锁定与精确坐标；输出保持原有格式，全部在浏览器本地完成</p>
+  </div>
+
+  <!-- 上传 -->
+  <div class="card stat-card mb-4">
+    <div class="card-body">
+      <div id="dropZone" class="dropzone text-center py-4">
+        <i class="bi bi-cloud-arrow-up fs-1 text-primary"></i>
+        <p class="mb-1 fw-semibold">点击选择 或 拖拽图片到此处</p>
+        <p class="text-secondary small mb-0">支持 PNG / JPEG / WebP，可多选（多张时可将同一裁剪区域批量应用到全部）</p>
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编辑器 -->
+  <div class="card stat-card mb-4 d-none" id="editorCard">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <div class="fw-semibold"><i class="bi bi-crop me-1 text-primary"></i>
+          <span id="curName"></span>
+          <span class="text-secondary small ms-1" id="curSize"></span>
+          <span class="badge bg-primary-subtle text-primary ms-2" id="filePos"></span>
+        </div>
+        <div class="d-flex gap-2" id="fileSwitch"></div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-8 text-center">
+          <canvas id="cropStage"></canvas>
+          <p class="text-secondary small mt-1 mb-0">拖动选框移动 · 拖动边角控制点调整大小 · 深色区域将被裁掉</p>
+        </div>
+        <div class="col-lg-4">
+          <label class="form-label small fw-semibold mb-1">锁定比例</label>
+          <select class="form-select form-select-sm mb-3" id="ratioSel">
+            <option value="free" selected>自由</option>
+            <option value="1:1">1 : 1</option>
+            <option value="4:3">4 : 3</option>
+            <option value="3:4">3 : 4</option>
+            <option value="16:9">16 : 9</option>
+            <option value="9:16">9 : 16</option>
+            <option value="210:297">A4 纵向</option>
+            <option value="297:210">A4 横向</option>
+            <option value="182:257">B5 纵向</option>
+            <option value="257:182">B5 横向</option>
+          </select>
+
+          <label class="form-label small fw-semibold mb-1">精确坐标（原始像素）</label>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="input-group input-group-sm coord-input"><span class="input-group-text">X</span>
+              <input type="number" class="form-control" id="inX" min="0"></div>
+            <div class="input-group input-group-sm coord-input"><span class="input-group-text">Y</span>
+              <input type="number" class="form-control" id="inY" min="0"></div>
+            <div class="input-group input-group-sm coord-input"><span class="input-group-text">宽</span>
+              <input type="number" class="form-control" id="inW" min="1"></div>
+            <div class="input-group input-group-sm coord-input"><span class="input-group-text">高</span>
+              <input type="number" class="form-control" id="inH" min="1"></div>
+          </div>
+
+          <div class="d-grid gap-2">
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary" id="allBtn"><i class="bi bi-fullscreen me-1"></i>全选</button>
+              <button class="btn btn-outline-secondary" id="resetBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>重置</button>
+            </div>
+            <button class="btn btn-primary" id="cropBtn"><i class="bi bi-scissors me-1"></i>裁剪当前图片</button>
+            <button class="btn btn-outline-primary d-none" id="cropAllBtn">
+              <i class="bi bi-stack me-1"></i>按此区域裁剪全部（<span id="allCount"></span> 张）
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="results"></div>
+{% endblock %}
+
+{% block extra_js %}
+  <script>
+    (function () {
+      var files = [];            // {file, url}
+      var cur = 0;               // 当前编辑的文件下标
+      var img = null;            // 当前 Image
+      var disp = { w: 0, h: 0, scale: 1 };   // 画布显示尺寸与 缩放比(原始/显示)
+      var rect = { x: 0, y: 0, w: 0, h: 0 }; // 裁剪框（显示坐标）
+      var drag = null;           // {mode, sx, sy, ox, oy, ow, oh}
+      var stage = document.getElementById('cropStage');
+      var ctx = stage.getContext('2d');
+      var fmtSize = function (n) {
+        if (n < 1024) { return n + ' B'; }
+        if (n < 1048576) { return (n / 1024).toFixed(1) + ' KB'; }
+        return (n / 1048576).toFixed(2) + ' MB';
+      };
+      function esc(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      // ---------- 上传 ----------
+      var zone = document.getElementById('dropZone');
+      var input = document.getElementById('fileInput');
+      zone.addEventListener('click', function () { input.click(); });
+      input.addEventListener('change', function () { addFiles(input.files); input.value = ''; });
+      ['dragenter', 'dragover'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) { e.preventDefault(); zone.classList.add('drag'); });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        zone.addEventListener(ev, function (e) { e.preventDefault(); zone.classList.remove('drag'); });
+      });
+      zone.addEventListener('drop', function (e) { addFiles(e.dataTransfer.files); });
+
+      function addFiles(list) {
+        var ok = ['image/png', 'image/jpeg', 'image/webp'];
+        files = [];
+        Array.prototype.forEach.call(list, function (f) {
+          if (ok.indexOf(f.type) >= 0) { files.push({ file: f, url: URL.createObjectURL(f) }); }
+        });
+        if (!files.length) { return; }
+        document.getElementById('editorCard').classList.remove('d-none');
+        document.getElementById('cropAllBtn').classList.toggle('d-none', files.length < 2);
+        document.getElementById('allCount').textContent = files.length;
+        cur = 0;
+        loadEditor(0);
+      }
+
+      function loadImage(url) {
+        return new Promise(function (res, rej) {
+          var i = new Image();
+          i.onload = function () { res(i); };
+          i.onerror = rej;
+          i.src = url;
+        });
+      }
+
+      // ---------- 编辑器 ----------
+      function loadEditor(idx) {
+        cur = idx;
+        loadImage(files[idx].url).then(function (i) {
+          img = i;
+          var maxW = stage.parentElement.clientWidth - 8;
+          var maxH = 520;
+          var s = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+          disp.w = Math.max(1, Math.round(img.naturalWidth * s));
+          disp.h = Math.max(1, Math.round(img.naturalHeight * s));
+          disp.scale = img.naturalWidth / disp.w;
+          stage.width = disp.w; stage.height = disp.h;
+          rect = { x: disp.w * 0.1, y: disp.h * 0.1, w: disp.w * 0.8, h: disp.h * 0.8 };
+          document.getElementById('curName').textContent = files[idx].file.name;
+          document.getElementById('curSize').textContent =
+            img.naturalWidth + '×' + img.naturalHeight + ' · ' + fmtSize(files[idx].file.size);
+          document.getElementById('filePos').textContent = (idx + 1) + ' / ' + files.length;
+          renderSwitch();
+          draw();
+          syncInputs();
+        });
+      }
+
+      function renderSwitch() {
+        var box = document.getElementById('fileSwitch');
+        if (files.length < 2) { box.innerHTML = ''; return; }
+        box.innerHTML = files.map(function (f, i) {
+          return '<button class="btn btn-sm ' + (i === cur ? 'btn-primary' : 'btn-outline-secondary') +
+            '" data-switch="' + i + '" title="' + esc(f.file.name) + '">' + (i + 1) + '</button>';
+        }).join('');
+        box.querySelectorAll('button[data-switch]').forEach(function (b) {
+          b.addEventListener('click', function () { loadEditor(+b.dataset.switch); });
+        });
+      }
+
+      function ratioVal() {
+        var v = document.getElementById('ratioSel').value;
+        if (v === 'free') { return 0; }
+        var p = v.split(':');
+        return +p[0] / +p[1];
+      }
+
+      function draw() {
+        if (!img) { return; }
+        ctx.clearRect(0, 0, disp.w, disp.h);
+        ctx.drawImage(img, 0, 0, disp.w, disp.h);
+        // 选框外加深色遮罩
+        ctx.fillStyle = 'rgba(15,23,42,.55)';
+        ctx.fillRect(0, 0, disp.w, rect.y);
+        ctx.fillRect(0, rect.y + rect.h, disp.w, disp.h - rect.y - rect.h);
+        ctx.fillRect(0, rect.y, rect.x, rect.h);
+        ctx.fillRect(rect.x + rect.w, rect.y, disp.w - rect.x - rect.w, rect.h);
+        // 边框与网格线
+        ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (var i = 1; i < 3; i++) {
+          ctx.moveTo(rect.x + rect.w * i / 3, rect.y);
+          ctx.lineTo(rect.x + rect.w * i / 3, rect.y + rect.h);
+          ctx.moveTo(rect.x, rect.y + rect.h * i / 3);
+          ctx.lineTo(rect.x + rect.w, rect.y + rect.h * i / 3);
+        }
+        ctx.stroke();
+        // 控制点
+        ctx.fillStyle = '#7c3aed';
+        handles().forEach(function (h) { ctx.fillRect(h.x - 4, h.y - 4, 8, 8); });
+      }
+
+      function handles() {
+        var x = rect.x, y = rect.y, w = rect.w, h = rect.h;
+        return [
+          { k: 'nw', x: x, y: y }, { k: 'n', x: x + w / 2, y: y }, { k: 'ne', x: x + w, y: y },
+          { k: 'w', x: x, y: y + h / 2 }, { k: 'e', x: x + w, y: y + h / 2 },
+          { k: 'sw', x: x, y: y + h }, { k: 's', x: x + w / 2, y: y + h }, { k: 'se', x: x + w, y: y + h }
+        ];
+      }
+
+      function hitHandle(mx, my) {
+        for (var i = 0; i < 8; i++) {
+          var h = handles()[i];
+          if (Math.abs(mx - h.x) <= 7 && Math.abs(my - h.y) <= 7) { return h.k; }
+        }
+        return null;
+      }
+      function inRect(mx, my) {
+        return mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h;
+      }
+      function pos(e) {
+        var r = stage.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      }
+
+      stage.addEventListener('mousedown', function (e) {
+        var p = pos(e);
+        var k = hitHandle(p.x, p.y);
+        if (k) { drag = { mode: 'resize-' + k, sx: p.x, sy: p.y, o: Object.assign({}, rect) }; }
+        else if (inRect(p.x, p.y)) { drag = { mode: 'move', sx: p.x, sy: p.y, o: Object.assign({}, rect) }; }
+        else { drag = { mode: 'new', sx: p.x, sy: p.y, o: Object.assign({}, rect) }; rect = { x: p.x, y: p.y, w: 1, h: 1 }; }
+        e.preventDefault();
+      });
+      window.addEventListener('mousemove', function (e) {
+        if (!drag) {
+          if (img) {   // 悬停光标
+            var p = pos(e);
+            stage.style.cursor = hitHandle(p.x, p.y) ? 'nwse-resize' : (inRect(p.x, p.y) ? 'move' : 'crosshair');
+          }
+          return;
+        }
+        var p = pos(e);
+        var r = Object.assign({}, drag.o);
+        var ratio = ratioVal();
+        if (drag.mode === 'move') {
+          rect.x = Math.min(Math.max(0, r.x + p.x - drag.sx), disp.w - r.w);
+          rect.y = Math.min(Math.max(0, r.y + p.y - drag.sy), disp.h - r.h);
+        } else if (drag.mode === 'new') {
+          rect.x = Math.min(drag.sx, p.x); rect.y = Math.min(drag.sy, p.y);
+          rect.w = Math.abs(p.x - drag.sx); rect.h = Math.abs(p.y - drag.sy);
+          rect.x = Math.max(0, rect.x); rect.y = Math.max(0, rect.y);
+          rect.w = Math.min(rect.w, disp.w - rect.x); rect.h = Math.min(rect.h, disp.h - rect.y);
+          if (ratio) { rect.h = rect.w / ratio; if (rect.y + rect.h > disp.h) { rect.h = disp.h - rect.y; rect.w = rect.h * ratio; } }
+        } else {
+          var k = drag.mode.slice(7);
+          var dx = p.x - drag.sx, dy = p.y - drag.sy;
+          if (k.indexOf('w') >= 0) { r.x = r.x + dx; r.w = r.w - dx; }
+          if (k.indexOf('e') >= 0) { r.w = r.w + dx; }
+          if (k.indexOf('n') >= 0) { r.y = r.y + dy; r.h = r.h - dy; }
+          if (k.indexOf('s') >= 0) { r.h = r.h + dy; }
+          if (ratio && r.w > 0 && r.h > 0) { r.h = r.w / ratio; }
+          // 边界与最小尺寸
+          r.w = Math.max(10, r.w); r.h = Math.max(10, r.h);
+          r.x = Math.min(Math.max(0, r.x), disp.w - 10);
+          r.y = Math.min(Math.max(0, r.y), disp.h - 10);
+          r.w = Math.min(r.w, disp.w - r.x); r.h = Math.min(r.h, disp.h - r.y);
+          rect = r;
+        }
+        draw();
+        syncInputs();
+      });
+      window.addEventListener('mouseup', function () { drag = null; });
+
+      // ---------- 坐标输入 ----------
+      function syncInputs() {
+        var s = disp.scale;
+        document.getElementById('inX').value = Math.round(rect.x * s);
+        document.getElementById('inY').value = Math.round(rect.y * s);
+        document.getElementById('inW').value = Math.round(rect.w * s);
+        document.getElementById('inH').value = Math.round(rect.h * s);
+      }
+      ['inX', 'inY', 'inW', 'inH'].forEach(function (id) {
+        document.getElementById(id).addEventListener('input', function () {
+          var s = disp.scale;
+          var x = +document.getElementById('inX').value || 0;
+          var y = +document.getElementById('inY').value || 0;
+          var w = +document.getElementById('inW').value || 0;
+          var h = +document.getElementById('inH').value || 0;
+          rect.x = Math.min(Math.max(0, x / s), disp.w - 1);
+          rect.y = Math.min(Math.max(0, y / s), disp.h - 1);
+          rect.w = Math.min(Math.max(1, w / s), disp.w - rect.x);
+          rect.h = Math.min(Math.max(1, h / s), disp.h - rect.y);
+          draw();
+        });
+      });
+      document.getElementById('ratioSel').addEventListener('change', function () {
+        var ratio = ratioVal();
+        if (!ratio) { return; }
+        var cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+        var w = Math.min(rect.w, disp.w, disp.h * ratio);
+        var h = w / ratio;
+        if (h > disp.h) { h = disp.h; w = h * ratio; }
+        rect = { x: cx - w / 2, y: cy - h / 2, w: w, h: h };
+        rect.x = Math.min(Math.max(0, rect.x), disp.w - w);
+        rect.y = Math.min(Math.max(0, rect.y), disp.h - h);
+        draw(); syncInputs();
+      });
+      document.getElementById('allBtn').addEventListener('click', function () {
+        rect = { x: 0, y: 0, w: disp.w, h: disp.h }; draw(); syncInputs();
+      });
+      document.getElementById('resetBtn').addEventListener('click', function () {
+        rect = { x: disp.w * 0.1, y: disp.h * 0.1, w: disp.w * 0.8, h: disp.h * 0.8 };
+        document.getElementById('ratioSel').value = 'free';
+        draw(); syncInputs();
+      });
+
+      // ---------- 裁剪 ----------
+      function cropBlob(image, sx, sy, sw, sh, mime) {
+        var c = document.createElement('canvas');
+        c.width = sw; c.height = sh;
+        var cc = c.getContext('2d');
+        if (mime === 'image/jpeg') { cc.fillStyle = '#fff'; cc.fillRect(0, 0, sw, sh); }
+        cc.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+        return new Promise(function (res, rej) {
+          c.toBlob(function (b) {
+            (b && b.type === mime) ? res(b) : rej(new Error('encode'));
+          }, mime, mime === 'image/png' ? undefined : 0.92);
+        });
+      }
+
+      document.getElementById('cropBtn').addEventListener('click', function () {
+        doCrop([cur]);
+      });
+      document.getElementById('cropAllBtn').addEventListener('click', function () {
+        doCrop(files.map(function (_, i) { return i; }));
+      });
+
+      function doCrop(idxs) {
+        var s = disp.scale;
+        var n = {                                   // 归一化区域
+          x: rect.x * s / img.naturalWidth, y: rect.y * s / img.naturalHeight,
+          w: rect.w * s / img.naturalWidth, h: rect.h * s / img.naturalHeight
+        };
+        var jobs = idxs.map(function (i) {
+          return loadImage(files[i].url).then(function (im) {
+            var sx = Math.min(im.naturalWidth - 1, Math.max(0, Math.round(n.x * im.naturalWidth)));
+            var sy = Math.min(im.naturalHeight - 1, Math.max(0, Math.round(n.y * im.naturalHeight)));
+            var sw = Math.max(1, Math.min(Math.round(n.w * im.naturalWidth), im.naturalWidth - sx));
+            var sh = Math.max(1, Math.min(Math.round(n.h * im.naturalHeight), im.naturalHeight - sy));
+            var mime = files[i].file.type;
+            return cropBlob(im, sx, sy, sw, sh, mime).then(function (blob) {
+              return { i: i, blob: blob, sw: sw, sh: sh, ow: im.naturalWidth, oh: im.naturalHeight, mime: mime };
+            });
+          }).catch(function () { return { i: i, error: true }; });
+        });
+        Promise.all(jobs).then(function (out) { renderResults(out); });
+      }
+
+      function extOf(mime) {
+        return { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[mime] || 'img';
+      }
+
+      function renderResults(list) {
+        var rows = list.map(function (r, i) {
+          if (r.error) {
+            return '<div class="d-flex align-items-center gap-3 py-2 border-bottom">' +
+              '<i class="bi bi-x-circle text-danger"></i>' +
+              '<span class="text-danger small">无法原样裁剪（浏览器不能编码该格式）</span></div>';
+          }
+          var f = files[r.i].file;
+          var url = URL.createObjectURL(r.blob);
+          return '<div class="d-flex align-items-center gap-3 py-2 border-bottom flex-wrap">' +
+            '<img class="thumb" src="' + url + '">' +
+            '<div><div class="fw-semibold small">' + esc(f.name.replace(/\.[^.]+$/, '') + '_cropped.' + extOf(r.mime)) + '</div>' +
+            '<div class="text-secondary" style="font-size:.8rem">' + r.ow + '×' + r.oh + ' → <b class="text-body">' +
+            r.sw + '×' + r.sh + '</b> <span class="ms-1">' + fmtSize(f.size) + ' → ' + fmtSize(r.blob.size) + '</span></div></div>' +
+            '<span class="ms-auto"><button class="btn btn-sm btn-outline-primary" data-dl="' + i + '">' +
+            '<i class="bi bi-download"></i> 下载</button></span></div>';
+        }).join('');
+        document.getElementById('results').innerHTML =
+          '<div class="card stat-card mb-4"><div class="card-body">' + rows + '</div></div>';
+        list.forEach(function (r, i) {
+          if (r.error) { return; }
+          var b = document.querySelector('button[data-dl="' + i + '"]');
+          b.addEventListener('click', function () {
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(r.blob);
+            a.download = files[r.i].file.name.replace(/\.[^.]+$/, '') + '_cropped.' + extOf(r.mime);
+            document.body.appendChild(a); a.click(); a.remove();
+          });
+        });
+      }
+    })();
+  </script>
+{% endblock %}

@@ -56,6 +56,8 @@
          href="{% url 'tools:image_convert_page' %}"><i class="bi bi-arrow-left-right"></i> 格式转换</a>
       <a class="nav-link {% if request.resolver_match.url_name == 'resize_page' %}active{% endif %}"
          href="{% url 'tools:resize_page' %}"><i class="bi bi-file-earmark-image"></i> 图片缩小</a>
+      <a class="nav-link {% if request.resolver_match.url_name == 'crop_page' %}active{% endif %}"
+         href="{% url 'tools:crop_page' %}"><i class="bi bi-crop"></i> 图片裁剪</a>
 
       <p class="nav-section">电脑相关</p>
       <a class="nav-link {% if request.resolver_match.url_name == 'wifi_page' %}active{% endif %}"
